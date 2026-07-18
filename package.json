@@ -1,0 +1,26 @@
+{
+  "name": "vetra-flight-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development node server.mjs",
+    "build": "vite build",
+    "test:safety": "node scripts/safety-smoke.mjs",
+    "test:hosted-safety": "node scripts/hosted-safety-smoke.mjs",
+    "start": "NODE_ENV=production node server.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "lucide-react": "^0.468.0",
+    "openai": "^6.0.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {}
+}
