@@ -28,8 +28,10 @@ const allowedOrigins = new Set(
 const projectId = process.env.OPENAI_PROJECT_ID?.trim()
 const complimentaryTokensConfirmed =
   process.env.OPENAI_COMPLIMENTARY_TOKENS_CONFIRMED === 'true'
-const redisUrl = process.env.UPSTASH_REDIS_REST_URL?.replace(/\/$/, '')
-const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN
+const redisUrl = (
+  process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
+)?.replace(/\/$/, '')
+const redisToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
 const openai = process.env.OPENAI_API_KEY && projectId
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY, project: projectId })
   : null

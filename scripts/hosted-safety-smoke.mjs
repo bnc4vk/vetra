@@ -9,6 +9,8 @@ process.env.OPENAI_HOSTED_SAFE_FRACTION = '0.4'
 process.env.VETRA_ALLOWED_ORIGINS = 'https://bnc4vk.github.io'
 delete process.env.UPSTASH_REDIS_REST_URL
 delete process.env.UPSTASH_REDIS_REST_TOKEN
+delete process.env.KV_REST_API_URL
+delete process.env.KV_REST_API_TOKEN
 
 const { default: handler } = await import('../api/index.mjs')
 
