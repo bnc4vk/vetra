@@ -68,6 +68,37 @@ Executed three times through the real Vetra UI with keyboard and click interacti
 - The restricted `Vetra local demo` project key shows last used July 18, 2026 and monthly spend
   of $0.00.
 
+## Hosted parity acceptance pass
+
+Executed through the public Pages URL with real DOM-backed clicks and keyboard input:
+
+- Public frontend: `https://bnc4vk.github.io/vetra-pages/`.
+- Server-side API: `https://vetra-api-three.vercel.app`.
+- The canonical brief was submitted with `Control+Enter` and returned `6 constraints · GPT-5.4
+  interpreted`; no scripted-fallback response appeared.
+- The five-city route, 2026 dates, Tokyo arrival cutoff, and required business-class outbound were
+  all preserved.
+- Amex, Chase, and Aeroplan were connected through their simulated authorization modals; the
+  review showed the expected 570,450-point total.
+- Optimization reached all three ranked strategies, and option one expanded successfully.
+- The hosted request used 733 tokens. The Redis-backed hosted ledger reported 97,232 tokens
+  remaining under its conservative 100,000-token ceiling after accounting for the 2,035-token
+  pre-test organization baseline.
+- OpenAI Usage reconciled to 2,768 tokens total: 1,724 input + 1,044 output. Both categories are
+  explicitly grouped as `data sharing incentive tier`.
+- `Vetra hosted demo` is active, restricted, last used July 18, 2026, and shows $0.00 monthly
+  spend. `Vetra local demo` is likewise restricted and shows $0.00.
+- The originally exposed `My Test Key` is inactive and reduced to read-only permissions.
+- Browser console: no warnings or errors after the complete hosted pass.
+
+Deployment evidence:
+
+- Private source repository: `bnc4vk/vetra`.
+- Public artifact-only repository: `bnc4vk/vetra-pages`.
+- Latest source workflow run for the hosted-quota commit: `29651965229` (successful).
+- Vercel production deployment: `dpl_4xUnzFQ7o93Xd4mp6dgmp11d9ZRV`, aliased to the stable API URL.
+- GitHub Pages reported its public artifact deployment as built.
+
 ## Arithmetic audit
 
 - Option 1 funding: 41,250 Aeroplan + 126,750 Amex = 168,000 points.
@@ -94,3 +125,9 @@ Verified in the authenticated Brahe Labs organization on 2026-07-18:
   222,965 tokens within that ceiling.
 - Usage attribution and the key's $0.00 spend confirm that the reconciled tests used the complimentary
   data-sharing tier and did not consume paid credits.
+- One additional public hosted request used 733 tokens, bringing the reconciled organization total
+  to 2,768 tokens. The Usage dashboard attributes all 2,768 tokens to the data-sharing incentive
+  tier, while both Vetra keys remain at $0.00 monthly spend.
+- The hosted service uses a separate 100,000-token ceiling (40% of the 250,000-token offer) with an
+  atomic shared ledger and leaves 150,000 tokens of organization-level headroom for activity outside
+  the hosted demo.

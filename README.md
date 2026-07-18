@@ -51,6 +51,12 @@ complimentary-quota preflight API.
 
 ## Hosted preview architecture
 
+Live surfaces:
+
+- Public demo: <https://bnc4vk.github.io/vetra-pages/>
+- Private source: <https://github.com/bnc4vk/vetra>
+- Hosted API health: <https://vetra-api-three.vercel.app/api/health>
+
 The deployable demo keeps frontend and secret-bearing backend separate:
 
 - The private `bnc4vk/vetra` repository builds the Vite app with
@@ -64,6 +70,12 @@ The deployable demo keeps frontend and secret-bearing backend separate:
 - The hosted API defaults to a 100,000-token ceiling—40% of the 250,000-token daily offer—so
   150,000 tokens remain as headroom for other eligible organization usage.
 - A failed or ambiguous OpenAI request keeps its full reservation in the hosted ledger.
+
+GitHub Pages cannot be enabled directly on this private repository under the current GitHub
+plan. The private-source workflow therefore publishes only the compiled artifact to the public
+`vetra-pages` repository. Vercel deployment is intentionally independent of a GitHub login
+connection: the current production function was deployed from the clean committed tree with the
+Vercel CLI, and its stable alias is compiled into the Pages frontend.
 
 Required backend secrets are documented in `.env.example`. OpenAI recommends keeping API
 keys out of source code and public repositories and exposing them to applications through
