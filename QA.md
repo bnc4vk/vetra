@@ -72,7 +72,7 @@ Executed three times through the real Vetra UI with keyboard and click interacti
 
 Executed through the public Pages URL with real DOM-backed clicks and keyboard input:
 
-- Public frontend: `https://bnc4vk.github.io/vetra-pages/`.
+- Public frontend at the time of this pass: `https://bnc4vk.github.io/vetra-pages/`.
 - Server-side API: `https://vetra-api-three.vercel.app`.
 - The canonical brief was submitted with `Control+Enter` and returned `6 constraints · GPT-5.4
   interpreted`; no scripted-fallback response appeared.
@@ -94,7 +94,8 @@ Executed through the public Pages URL with real DOM-backed clicks and keyboard i
 Deployment evidence:
 
 - Public source repository: `bnc4vk/vetra`.
-- Public artifact-only repository: `bnc4vk/vetra-pages`.
+- Former public artifact-only repository: `bnc4vk/vetra-pages` (superseded by native Pages in
+  `bnc4vk/vetra`).
 - Latest source workflow run for the hosted-quota commit: `29651965229` (successful).
 - Vercel production deployment: `dpl_4xUnzFQ7o93Xd4mp6dgmp11d9ZRV`, aliased to the stable API URL.
 - GitHub Pages reported its public artifact deployment as built.

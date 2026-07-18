@@ -53,16 +53,14 @@ complimentary-quota preflight API.
 
 Live surfaces:
 
-- Public demo: <https://bnc4vk.github.io/vetra-pages/>
+- Public demo: <https://bnc4vk.github.io/vetra/>
 - Public source: <https://github.com/bnc4vk/vetra>
 - Hosted API health: <https://vetra-api-three.vercel.app/api/health>
 
 The deployable demo keeps frontend and secret-bearing backend separate:
 
-- The public `bnc4vk/vetra` source repository builds the Vite app with
-  `VITE_BASE_PATH=/vetra-pages/` and publishes only `dist/` to the public
-  `bnc4vk/vetra-pages` deployment repository. Keeping the deployment branch artifact-only
-  preserves the established preview URL and makes the published surface easy to audit.
+- The public `bnc4vk/vetra` repository builds the Vite app with
+  `VITE_BASE_PATH=/vetra/` and deploys `dist/` through GitHub's native Pages artifact workflow.
 - The repository variable `VETRA_API_BASE_URL` is compiled into the frontend as the public
   URL of the hosted API. No OpenAI or Redis credential is included in the browser bundle.
 - Vercel runs `api/index.mjs` as a server-side function.
@@ -71,10 +69,10 @@ The deployable demo keeps frontend and secret-bearing backend separate:
   150,000 tokens remain as headroom for other eligible organization usage.
 - A failed or ambiguous OpenAI request keeps its full reservation in the hosted ledger.
 
-The source repository is public. Its workflow publishes the compiled artifact to the dedicated
-`vetra-pages` repository. Vercel deployment is intentionally independent of a GitHub login
-connection: the current production function was deployed from the clean committed tree with the
-Vercel CLI, and its stable alias is compiled into the Pages frontend.
+The source and Pages workflow now live in this single repository. Vercel deployment is
+intentionally independent of a GitHub login connection: the current production function was
+deployed from the clean committed tree with the Vercel CLI, and its stable alias is compiled into
+the Pages frontend.
 
 Required backend secrets are documented in `.env.example`. OpenAI recommends keeping API
 keys out of source code and public repositories and exposing them to applications through

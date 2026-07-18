@@ -1,4 +1,4 @@
-name: Deploy public preview
+name: Deploy GitHub Pages
 
 on:
   push:
@@ -7,13 +7,18 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 concurrency:
-  group: public-preview
+  group: pages
   cancel-in-progress: true
 
 jobs:
-  build:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -27,22 +32,15 @@ jobs:
         run: npm ci
       - name: Build Vetra
         env:
-          VITE_BASE_PATH: /vetra-pages/
+          VITE_BASE_PATH: /vetra/
           VITE_API_BASE_URL: ${{ vars.VETRA_API_BASE_URL }}
         run: npm run build
-      - name: Publish compiled site
-        env:
-          DEPLOY_KEY: ${{ secrets.PAGES_DEPLOY_KEY }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/vetra-pages
-          chmod 600 ~/.ssh/vetra-pages
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          cd dist
-          git init -b main
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .
-          git commit -m "Deploy ${GITHUB_SHA}"
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/vetra-pages -o IdentitiesOnly=yes" \
-            git push --force git@github.com:bnc4vk/vetra-pages.git main
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
