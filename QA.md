@@ -93,11 +93,33 @@ Executed through the public Pages URL with real DOM-backed clicks and keyboard i
 
 Deployment evidence:
 
-- Private source repository: `bnc4vk/vetra`.
+- Public source repository: `bnc4vk/vetra`.
 - Public artifact-only repository: `bnc4vk/vetra-pages`.
 - Latest source workflow run for the hosted-quota commit: `29651965229` (successful).
 - Vercel production deployment: `dpl_4xUnzFQ7o93Xd4mp6dgmp11d9ZRV`, aliased to the stable API URL.
 - GitHub Pages reported its public artifact deployment as built.
+
+## Post-publication parity pass
+
+After changing `bnc4vk/vetra` from private to public, workflow run `29652376406` republished source
+commit `0895381` successfully. GitHub Pages reported the new artifact as built and the public URL
+returned HTTP 200.
+
+The complete public-site flow was then repeated with real DOM-backed keyboard and click interaction:
+
+- Reset the persisted wallet and restarted from a genuine zero-program first-time state.
+- Submitted the canonical brief with `Control+Enter`; GPT-5.4 returned the correct five-city route,
+  hard Tokyo arrival cutoff, business-class requirement, dates, and points-only optimization goal.
+- Confirmed the brief, connected Amex, Chase, and Aeroplan through all three simulated authorization
+  modals, and verified the 570,450-point wallet total.
+- Reached the review stage, ran optimization, expanded all three ranked strategies, and inspected the
+  assumptions, funding plans, value calculations, airport changes, and tradeoffs.
+- Submitted a non-canonical Chicago–London brief. GPT-5.4 correctly interpreted the roundtrip, 9:00 AM
+  arrival cutoff, business-class requirement, and return date; continuation was disabled and no Tokyo
+  result was substituted.
+- Browser console: no warnings or errors after the full deployed pass.
+- The three GPT calls in this pass added 2,132 tokens to the hosted ledger. Hosted usage now totals
+  2,865 tokens, leaving 95,100 tokens under the conservative ceiling after the 2,035-token baseline.
 
 ## Arithmetic audit
 
