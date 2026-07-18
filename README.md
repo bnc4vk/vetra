@@ -53,7 +53,10 @@ complimentary-quota preflight API.
 
 The deployable demo keeps frontend and secret-bearing backend separate:
 
-- GitHub Pages builds the Vite app with `VITE_BASE_PATH=/vetra/`.
+- The private `bnc4vk/vetra` repository builds the Vite app with
+  `VITE_BASE_PATH=/vetra-pages/` and publishes only `dist/` to the public
+  `bnc4vk/vetra-pages` deployment repository. This avoids exposing source code while working
+  on GitHub plans that do not support Pages directly from private repositories.
 - The repository variable `VETRA_API_BASE_URL` is compiled into the frontend as the public
   URL of the hosted API. No OpenAI or Redis credential is included in the browser bundle.
 - Vercel runs `api/index.mjs` as a server-side function.
