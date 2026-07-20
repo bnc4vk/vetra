@@ -1,1106 +1,1208 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
-  AlertTriangle,
   ArrowRight,
+  ArrowUp,
   Check,
-  ChevronDown,
-  ChevronRight,
-  CircleDollarSign,
-  Clock3,
-  ExternalLink,
-  Gauge,
-  Globe2,
-  Info,
-  Link2,
-  LockKeyhole,
-  MessageSquareText,
-  MoreHorizontal,
-  Plane,
-  Plus,
-  RefreshCw,
-  Route,
+  CircleAlert,
+  RotateCcw,
   Search,
   ShieldCheck,
   Sparkles,
-  Star,
-  Unplug,
-  WalletCards,
   X,
-  Zap,
 } from 'lucide-react'
+import {
+  applyFollowUpToBrief,
+  applyItineraryOperations,
+  interpretItineraryAdjustment,
+  interpretTrip,
+  isPlausibleCityAnswer,
+  toUiTripBrief,
+  validateItinerary,
+} from './tripIntelligence'
 
-const DEMO_PROMPT =
-  "I'm traveling solo from New York. I need to arrive in Tokyo before 4pm on October 8, then fly to Seoul on October 12, Honolulu on October 16, and return to New York on October 20, plus or minus one day. Business class is required from New York to Tokyo; I'm flexible on cabin for the other flights. Optimize the complete itinerary using my linked points and miles, including transfer options, fees, and cash alternatives."
-
-const REQUIRED_DEMO_PROGRAM_IDS = ['amex', 'chase', 'aeroplan']
-const normalizeBrief = (value) => value.trim().replace(/\s+/g, ' ').toLowerCase()
-const isCanonicalDemoBrief = (value) => normalizeBrief(value) === normalizeBrief(DEMO_PROMPT)
-
-const programs = [
-  {
-    id: 'amex',
-    name: 'American Express',
-    program: 'Membership Rewards',
-    mark: 'AM',
-    color: '#1677d2',
-    tint: '#eaf4ff',
-    balance: 342800,
-    type: 'Flexible points',
-  },
-  {
-    id: 'chase',
-    name: 'Chase',
-    program: 'Ultimate Rewards',
-    mark: 'CH',
-    color: '#0b6158',
-    tint: '#e9f7f3',
-    balance: 186400,
-    type: 'Flexible points',
-  },
-  {
-    id: 'aeroplan',
-    name: 'Air Canada',
-    program: 'Aeroplan',
-    mark: 'AC',
-    color: '#d8292f',
-    tint: '#fff0f0',
-    balance: 41250,
-    type: 'Airline miles',
-  },
-  {
-    id: 'united',
-    name: 'United',
-    program: 'MileagePlus',
-    mark: 'UA',
-    color: '#154aa0',
-    tint: '#eef3ff',
-    balance: 62100,
-    type: 'Airline miles',
-  },
-  {
-    id: 'capitalone',
-    name: 'Capital One',
-    program: 'Miles',
-    mark: 'C1',
-    color: '#9f173d',
-    tint: '#fff0f4',
-    balance: 0,
-    type: 'Flexible points',
-  },
-  {
-    id: 'flyingblue',
-    name: 'Flying Blue',
-    program: 'Air France · KLM',
-    mark: 'FB',
-    color: '#142b8f',
-    tint: '#eff2ff',
-    balance: 0,
-    type: 'Airline miles',
-  },
-]
-
-const constraints = [
-  { icon: 'route', label: 'Route', value: 'NYC → Tokyo → Seoul → Honolulu → NYC' },
-  { icon: 'date', label: 'Hard arrival', value: 'Tokyo · Oct 8 before 4:00 PM', hard: true },
-  { icon: 'cabin', label: 'Cabin', value: 'Business required · NYC to Tokyo', hard: true },
-  { icon: 'date', label: 'Fixed dates', value: 'Seoul Oct 12 · Honolulu Oct 16' },
-  { icon: 'flex', label: 'Return window', value: 'Oct 19–21' },
-  { icon: 'traveler', label: 'Travelers', value: '1 adult' },
-]
-
-const DEMO_INTERPRETATION = {
-  assistantMessage:
-    'I’ve translated that into a flight brief. Before I work through your points, check that I’ve treated the right things as non-negotiable.',
-  routeCities: ['New York', 'Tokyo', 'Seoul', 'Honolulu', 'New York'],
-  constraints,
-  meta: { fallback: true },
+const WELCOME_COPY =
+  'Welcome to Vetra, the intelligent flights agent personalized to your travel style and award balances.'
+const PROMPT_COPY = "Tell me where you need to be. I’ll get started on the trip planning."
+const DEV_STEP3_BRIEF = import.meta.env.DEV
+  ? 'i need to be in Tokyo on nov 12th. i live in new york. i have two total weeks that i can travel for, and want to take advantage of being in that part of the world to explore south korea'
+  : ''
+const DEV_STEP3_MODE = Boolean(
+  import.meta.env.DEV
+  && typeof window !== 'undefined'
+  && new URLSearchParams(window.location.search).get('dev') === 'step3',
+)
+const DEV_ADJUST_MODE = Boolean(
+  import.meta.env.DEV
+  && typeof window !== 'undefined'
+  && new URLSearchParams(window.location.search).get('dev') === 'adjust',
+)
+const DEV_ADJUST_BRIEF = DEV_ADJUST_MODE ? {
+  raw: DEV_STEP3_BRIEF,
+  revision: 0,
+  appliedOperationIds: [],
+  travelers: 'Travelers Not Specified',
+  flexibility: 'Two-Week Trip',
+  tripDurationDays: 14,
+  tripSummary: '14-Day Trip',
+  cities: ['New York', 'Tokyo', 'Seoul', 'New York'],
+  route: 'New York → Tokyo → Seoul → New York',
+  followUpQuestions: [],
+  flightLegs: [
+    { legId: 'dev-leg-1', route: 'New York → Tokyo', origin: 'New York', originKind: 'city', destination: 'Tokyo', destinationKind: 'city', timing: 'Arrive By Nov 12', timingKind: 'arrive_by', timingEvidence: 'explicit', cabin: 'Not Specified', cabinEvidence: 'missing', detail: 'Tokyo Arrival Required', status: 'captured', statusLabel: 'Captured', pending: false, resolved: false },
+    { legId: 'dev-leg-2', route: 'Tokyo → Seoul', origin: 'Tokyo', originKind: 'city', destination: 'Seoul', destinationKind: 'city', timing: 'Within Two-Week Trip', timingKind: 'trip_window', timingEvidence: 'implied', cabin: 'Not Specified', cabinEvidence: 'missing', detail: 'South Korea Stop', status: 'captured', statusLabel: 'Captured', pending: false, resolved: false },
+    { legId: 'dev-leg-3', route: 'Seoul → New York', origin: 'Seoul', originKind: 'city', destination: 'New York', destinationKind: 'city', timing: 'Within Two-Week Trip', timingKind: 'trip_window', timingEvidence: 'implied', cabin: 'Not Specified', cabinEvidence: 'missing', detail: 'Return Home', status: 'suggested', statusLabel: 'Return Implied', pending: false, resolved: false },
+  ],
+  source: { kind: 'dev', model: 'gpt-5.4-2026-03-05', contractVersion: 'itinerary-intent/v1' },
+} : null
+const MOTION = {
+  welcomeWord: 232,
+  promptWord: 192,
+  questionWord: 168,
+  welcomeHold: 1100,
+  promptHold: 400,
+  copyExit: 260,
+  capture: 620,
+  preliminaryMinBeat: 800,
+  preliminaryMaxBeat: 1100,
+  preliminaryResolve: 380,
+  preliminaryHold: 420,
+  followUpProcess: 720,
+  followUpSettle: 580,
+  rewardsReveal: 720,
+  awardsExit: 480,
+  programLink: 800,
+  adjustmentMinProcess: 720,
+  adjustmentSettle: 380,
+  adjustmentCopy: 110,
+  optimizationStages: [1250, 1450, 1300, 1650],
+  optimizationExit: 380,
 }
 
-const analysisStages = [
-  { label: 'Mapping viable award routes', detail: '41 route combinations' },
-  { label: 'Checking the Tokyo arrival constraint', detail: '18 remain' },
-  { label: 'Pricing across loyalty programs', detail: '9 programs' },
-  { label: 'Testing transfer paths against balances', detail: '27 paths' },
-  { label: 'Comparing taxes and cash alternatives', detail: '$8,240 analyzed' },
-  { label: 'Ranking complete flight strategies', detail: '3 recommendations' },
+const programs = [
+  { id: 'amex', name: 'Amex', program: 'Membership Rewards', mark: 'AM', balance: 342800, color: '#1769aa', tint: '#eaf5ff', featured: true },
+  { id: 'chase', name: 'Chase', program: 'Ultimate Rewards', mark: 'CH', balance: 186400, color: '#146b5b', tint: '#e8f6f1', featured: true },
+  { id: 'capitalone', name: 'Capital One', program: 'Miles', mark: 'C1', balance: 91800, color: '#a01f46', tint: '#fff0f4', featured: true },
+  { id: 'citi', name: 'Citi', program: 'ThankYou Rewards', mark: 'CI', balance: 128600, color: '#056dae', tint: '#eaf5fb', featured: true },
+  { id: 'bilt', name: 'Bilt', program: 'Rewards', mark: 'BI', balance: 74600, color: '#2d3132', tint: '#f0f1f1', featured: true },
+  { id: 'american', name: 'American', program: 'AAdvantage', mark: 'AA', balance: 84400, color: '#c3273c', tint: '#fff0f2', featured: true },
+  { id: 'united', name: 'United', program: 'MileagePlus', mark: 'UA', balance: 62100, color: '#174ea6', tint: '#edf3ff', featured: true },
+  { id: 'delta', name: 'Delta', program: 'SkyMiles', mark: 'DL', balance: 53750, color: '#9b1834', tint: '#fff0f4', featured: true },
+  { id: 'southwest', name: 'Southwest', program: 'Rapid Rewards', mark: 'WN', balance: 47600, color: '#304cb2', tint: '#eef1ff', featured: true },
+  { id: 'aeroplan', name: 'Aeroplan', program: 'Air Canada', mark: 'AC', balance: 41250, color: '#d8292f', tint: '#fff0f0', featured: true },
+  { id: 'flyingblue', name: 'Flying Blue', program: 'Air France · KLM', mark: 'FB', balance: 28750, color: '#293893', tint: '#eef0ff', featured: true },
+  { id: 'alaska', name: 'Alaska', program: 'Atmos Rewards', mark: 'AS', balance: 36400, color: '#005f6a', tint: '#e9f6f7', featured: true },
+  { id: 'jetblue', name: 'JetBlue', program: 'TrueBlue', mark: 'B6', balance: 23100, color: '#003876', tint: '#edf3fa', featured: true },
+  { id: 'britishairways', name: 'British Airways', program: 'The British Airways Club', mark: 'BA', balance: 52900, color: '#1b3f8b', tint: '#eef2fb' },
+  { id: 'virginatlantic', name: 'Virgin Atlantic', program: 'Flying Club', mark: 'VS', balance: 44750, color: '#c4143c', tint: '#fff0f4' },
+  { id: 'singapore', name: 'Singapore Airlines', program: 'KrisFlyer', mark: 'SQ', balance: 31800, color: '#d19b2a', tint: '#fff8e8' },
+  { id: 'emirates', name: 'Emirates', program: 'Skywards', mark: 'EK', balance: 26400, color: '#c52732', tint: '#fff0f1' },
+  { id: 'qatar', name: 'Qatar Airways', program: 'Privilege Club', mark: 'QR', balance: 35600, color: '#6d1740', tint: '#f8edf2' },
+  { id: 'cathay', name: 'Cathay Pacific', program: 'Asia Miles', mark: 'CX', balance: 24900, color: '#0c776c', tint: '#ebf7f5' },
+  { id: 'turkish', name: 'Turkish Airlines', program: 'Miles&Smiles', mark: 'TK', balance: 21400, color: '#c5162e', tint: '#fff0f2' },
+  { id: 'wellsfargo', name: 'Wells Fargo', program: 'Rewards', mark: 'WF', balance: 48600, color: '#b31b34', tint: '#fff0f2' },
+  { id: 'avianca', name: 'Avianca', program: 'LifeMiles', mark: 'AV', balance: 33700, color: '#d71920', tint: '#fff0f0' },
+  { id: 'qantas', name: 'Qantas', program: 'Frequent Flyer', mark: 'QF', balance: 29500, color: '#d51b2b', tint: '#fff0f1' },
+  { id: 'etihad', name: 'Etihad Airways', program: 'Etihad Guest', mark: 'EY', balance: 27300, color: '#8a6c3d', tint: '#f8f3ea' },
+  { id: 'korean', name: 'Korean Air', program: 'SKYPASS', mark: 'KE', balance: 19200, color: '#2369b3', tint: '#edf5fc' },
 ]
 
-const strategies = [
+const optimizationStages = [
+  { label: 'Mapping routes around your non-negotiables', meta: '41 paths considered' },
+  { label: 'Checking award options across your programs', meta: '9 programs compared' },
+  { label: 'Testing transfer combinations and fees', meta: '27 funding paths' },
+  { label: 'Ranking the strongest complete itineraries', meta: '3 final strategies' },
+]
+
+const recommendations = [
   {
-    rank: 1,
     label: 'Best overall',
-    title: 'Aeroplan-led strategy',
-    subtitle: 'Strongest balance of cabin quality, value, and simplicity',
-    points: 168000,
-    fees: 312,
-    cash: 6840,
-    cpp: 3.89,
+    title: 'Aeroplan-led itinerary',
+    detail: 'Business to Tokyo, then the most efficient economy awards onward',
+    points: '168,000 pts',
+    fees: '$312 fees',
+    value: '3.9¢ / point',
     score: 94,
-    confidence: 'High modeled confidence',
-    accent: '#5f5ce6',
-    reason:
-      'It meets every hard constraint, preserves business class on the longest flight, and saves 12,000 points versus the simplest option without adding a risky connection.',
-    tradeoff: 'One connection in Toronto on the outbound',
-    transfer: 'Transfer 126,750 Amex points to Aeroplan',
-    airportChanges: ['Seoul: arrive GMP on Oct 12; depart ICN on Oct 16'],
+    color: '#6258d6',
     segments: [
-      {
-        date: 'Oct 7, 2026',
-        from: 'JFK',
-        to: 'YYZ',
-        airline: 'Air Canada',
-        flight: 'AC 701',
-        time: '9:10 AM – 10:48 AM',
-        cabin: 'Business',
-        aircraft: 'A220-300',
-        bookWith: 'Included in the JFK–HND Aeroplan award',
-      },
-      {
-        date: 'Oct 7–8, 2026',
-        from: 'YYZ',
-        to: 'HND',
-        airline: 'Air Canada',
-        flight: 'AC 1',
-        time: '1:15 PM – 3:05 PM +1',
-        cabin: 'Business',
-        aircraft: 'Boeing 777-300ER',
-        hard: 'Arrives 55m before cutoff',
-        bookWith: 'Aeroplan · 110,000 pts for JFK–HND',
-      },
-      {
-        date: 'Oct 12, 2026',
-        from: 'HND',
-        to: 'GMP',
-        airline: 'ANA',
-        flight: 'NH 865',
-        time: '4:10 PM – 6:35 PM',
-        cabin: 'Economy',
-        aircraft: 'Boeing 787-8',
-        bookWith: 'Aeroplan · 18,000 pts',
-      },
-      {
-        date: 'Oct 16, 2026',
-        from: 'ICN',
-        to: 'HNL',
-        airline: 'Asiana',
-        flight: 'OZ 232',
-        time: '8:20 PM – 9:50 AM',
-        cabin: 'Economy',
-        aircraft: 'Airbus A330-300',
-        bookWith: 'Aeroplan · 20,000 pts',
-      },
-      {
-        date: 'Oct 20, 2026',
-        from: 'HNL',
-        to: 'EWR',
-        airline: 'United',
-        flight: 'UA 362',
-        time: '4:55 PM – 7:36 AM +1',
-        cabin: 'Economy Plus',
-        aircraft: 'Boeing 767-400',
-        bookWith: 'Aeroplan · 20,000 pts',
-      },
+      { route: 'JFK → YYZ', timing: 'October 7 · 9:10 AM', cabin: 'Business Class', detail: 'Air Canada · AC 701' },
+      { route: 'YYZ → HND', timing: 'October 7 · 1:15 PM', cabin: 'Business Class', detail: 'Air Canada · AC 1', constraint: 'Arrives 55m Early' },
+      { route: 'HND → GMP', timing: 'October 12 · 4:10 PM', cabin: 'Economy', detail: 'ANA · NH 865' },
+      { route: 'ICN → HNL', timing: 'October 16 · 8:20 PM', cabin: 'Economy', detail: 'Asiana · OZ 232' },
+      { route: 'HNL → EWR', timing: 'October 20 · 4:55 PM', cabin: 'Economy Plus', detail: 'United · UA 362' },
     ],
-    funding: [
-      { source: 'Aeroplan balance', amount: '41,250', use: 'Use existing miles' },
-      { source: 'Amex Membership Rewards', amount: '126,750', use: 'Transfer 1:1 to Aeroplan' },
+    rationale: [
+      { label: 'Constraint Fit', value: 'Business To Tokyo · Arrives 55m Before Cutoff' },
+      { label: 'Funding', value: '41,250 Aeroplan + 126,750 Amex' },
+      { label: 'Trade-Off', value: 'One Toronto Connection · $312 Taxes' },
     ],
   },
   {
-    rank: 2,
-    label: 'Highest point value',
-    title: 'Virgin + United strategy',
-    subtitle: 'Fewer points, with a more involved booking path',
-    points: 145000,
-    fees: 684,
-    cash: 6910,
-    cpp: 4.29,
+    label: 'Best point value',
+    title: 'Virgin + United itinerary',
+    detail: 'Fewer points, with two transfers and a more involved booking path',
+    points: '145,000 pts',
+    fees: '$684 fees',
+    value: '4.3¢ / point',
     score: 89,
-    confidence: 'Medium modeled confidence',
-    accent: '#c64984',
-    reason:
-      'This extracts the highest modeled value from your points and uses fewer of them overall, but requires two transfers and a phone booking for the ANA segment.',
-    tradeoff: '$372 more in surcharges and two separate transfers',
-    transfer: 'Transfer Amex to Virgin Atlantic and Chase to United',
-    airportChanges: ['Tokyo: arrive HND on Oct 8; depart NRT on Oct 12'],
+    color: '#be477e',
     segments: [
-      {
-        date: 'Oct 7–8, 2026',
-        from: 'JFK',
-        to: 'HND',
-        airline: 'ANA',
-        flight: 'NH 159',
-        time: '2:05 AM – 5:15 AM +1',
-        cabin: 'Business',
-        aircraft: 'Boeing 777-300ER',
-        hard: 'Arrives 10h 45m before cutoff',
-        bookWith: 'Virgin Atlantic · 75,000 pts',
-      },
-      {
-        date: 'Oct 12, 2026',
-        from: 'NRT',
-        to: 'ICN',
-        airline: 'Asiana',
-        flight: 'OZ 101',
-        time: '1:20 PM – 4:05 PM',
-        cabin: 'Economy',
-        aircraft: 'Airbus A321',
-        bookWith: 'United · 15,000 pts',
-      },
-      {
-        date: 'Oct 16, 2026',
-        from: 'ICN',
-        to: 'HNL',
-        airline: 'Asiana',
-        flight: 'OZ 232',
-        time: '8:20 PM – 9:50 AM',
-        cabin: 'Economy',
-        aircraft: 'Airbus A330-300',
-        bookWith: 'United · 25,000 pts',
-      },
-      {
-        date: 'Oct 20, 2026',
-        from: 'HNL',
-        to: 'EWR',
-        airline: 'United',
-        flight: 'UA 362',
-        time: '4:55 PM – 7:36 AM +1',
-        cabin: 'Economy Plus',
-        aircraft: 'Boeing 767-400',
-        bookWith: 'United · 30,000 pts',
-      },
+      { route: 'JFK → HND', timing: 'October 7 · 2:05 AM', cabin: 'Business Class', detail: 'ANA · NH 159', constraint: 'Early Arrival' },
+      { route: 'NRT → ICN', timing: 'October 12 · 1:20 PM', cabin: 'Economy', detail: 'Asiana · OZ 101' },
+      { route: 'ICN → HNL', timing: 'October 16 · 8:20 PM', cabin: 'Economy', detail: 'Asiana · OZ 232' },
+      { route: 'HNL → EWR', timing: 'October 20 · 4:55 PM', cabin: 'Economy Plus', detail: 'United · UA 362' },
     ],
-    funding: [
-      { source: 'Amex Membership Rewards', amount: '75,000', use: 'Transfer 1:1 to Virgin Atlantic' },
-      { source: 'Chase Ultimate Rewards', amount: '70,000', use: 'Transfer 1:1 to United' },
+    rationale: [
+      { label: 'Point Value', value: 'Highest Modeled Return · 4.3¢ Per Point' },
+      { label: 'Funding', value: '75,000 Amex + 70,000 Chase' },
+      { label: 'Trade-Off', value: 'Two Transfers · $684 Taxes' },
     ],
   },
   {
-    rank: 3,
     label: 'Simplest booking',
-    title: 'United-only strategy',
-    subtitle: 'One program and one transfer across the entire trip',
-    points: 180000,
-    fees: 149,
-    cash: 6770,
-    cpp: 3.68,
-    score: 84,
-    confidence: 'High modeled confidence',
-    accent: '#167c6c',
-    reason:
-      'Every segment can be booked in one session through United. It is the easiest strategy to execute, but consumes 35,000 more transferable points than the highest-value option.',
-    tradeoff: 'Uses 35,000 more points than option two',
-    transfer: 'Transfer 180,000 Chase points to United',
-    airportChanges: ['Seoul: arrive GMP on Oct 12; depart ICN on Oct 16'],
+    title: 'United-led itinerary',
+    detail: 'One transfer partner and the fewest separate booking steps',
+    points: '180,000 pts',
+    fees: '$248 fees',
+    value: '3.7¢ / point',
+    score: 86,
+    color: '#17806c',
     segments: [
-      {
-        date: 'Oct 7–8, 2026',
-        from: 'EWR',
-        to: 'HND',
-        airline: 'United',
-        flight: 'UA 131',
-        time: '10:25 AM – 1:35 PM +1',
-        cabin: 'Polaris business',
-        aircraft: 'Boeing 777-200',
-        hard: 'Arrives 2h 25m before cutoff',
-        bookWith: 'United · 100,000 pts',
-      },
-      {
-        date: 'Oct 12, 2026',
-        from: 'HND',
-        to: 'GMP',
-        airline: 'ANA',
-        flight: 'NH 867',
-        time: '8:05 PM – 10:30 PM',
-        cabin: 'Economy',
-        aircraft: 'Boeing 787-8',
-        bookWith: 'United · 20,000 pts',
-      },
-      {
-        date: 'Oct 16, 2026',
-        from: 'ICN',
-        to: 'HNL',
-        airline: 'Asiana',
-        flight: 'OZ 232',
-        time: '8:20 PM – 9:50 AM',
-        cabin: 'Economy',
-        aircraft: 'Airbus A330-300',
-        bookWith: 'United · 30,000 pts',
-      },
-      {
-        date: 'Oct 20, 2026',
-        from: 'HNL',
-        to: 'EWR',
-        airline: 'United',
-        flight: 'UA 362',
-        time: '4:55 PM – 7:36 AM +1',
-        cabin: 'Economy Plus',
-        aircraft: 'Boeing 767-400',
-        bookWith: 'United · 30,000 pts',
-      },
+      { route: 'EWR → HND', timing: 'October 7 · 10:30 AM', cabin: 'Business Class', detail: 'United · UA 131', constraint: 'Direct' },
+      { route: 'HND → ICN', timing: 'October 12 · 3:45 PM', cabin: 'Economy', detail: 'United Partner Award' },
+      { route: 'ICN → HNL', timing: 'October 16 · 8:20 PM', cabin: 'Economy', detail: 'United Partner Award' },
+      { route: 'HNL → EWR', timing: 'October 20 · 4:55 PM', cabin: 'Economy Plus', detail: 'United · UA 362' },
     ],
-    funding: [
-      { source: 'Chase Ultimate Rewards', amount: '180,000', use: 'Transfer 1:1 to United' },
+    rationale: [
+      { label: 'Booking Path', value: 'One Program · Four Award Segments' },
+      { label: 'Funding', value: '180,000 Chase → United' },
+      { label: 'Trade-Off', value: '35,000 More Points · Lowest Fees' },
     ],
   },
 ]
 
 const formatNumber = (value) => new Intl.NumberFormat('en-US').format(value)
 
-function Brand({ compact = false }) {
+function normalizeItineraryText(value) {
+  if (!value) return ''
+  return String(value)
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/,?\s*(?:plus or minus|\+\/?-)\s*one day/gi, ' · ±1 Day')
+    .replace(/\b(am|pm)\b/gi, (match) => match.toUpperCase())
+    .split(' ')
+    .map((word) => {
+      if (/^[A-Z]{2,}(?:\d+)?$/.test(word) || /^[±\d$]/.test(word)) return word
+      return word.replace(/^([^A-Za-z]*)([A-Za-z])/, (_, prefix, first) => `${prefix}${first.toUpperCase()}`)
+    })
+    .join(' ')
+}
+
+function Brand() {
   return (
-    <div className={`brand ${compact ? 'brand--compact' : ''}`}>
-      <div className="brand-mark" aria-hidden="true">
-        <span />
-        <span />
-      </div>
+    <div className="brand" aria-label="Vetra">
+      <span className="brand-mark" aria-hidden="true"><i /><i /></span>
       <span>vetra</span>
     </div>
   )
 }
 
-function App() {
-  const [phase, setPhase] = useState('welcome')
-  const [draft, setDraft] = useState(DEMO_PROMPT)
-  const [submittedPrompt, setSubmittedPrompt] = useState(DEMO_PROMPT)
-  const [tripBrief, setTripBrief] = useState(DEMO_INTERPRETATION)
-  const [parseError, setParseError] = useState('')
-  const [linked, setLinked] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('vetra-linked-programs') || '[]')
-    } catch {
-      return []
+function WordReveal({ children, className = '', speed = 55, instant = false, onComplete }) {
+  const words = children.split(' ')
+  let cumulativeDelay = 0
+  const delays = words.map((word, index) => {
+    const delay = cumulativeDelay
+    if (index < words.length - 1) {
+      let punctuationPause = 0
+      if (/[.][”"']?$/.test(word)) punctuationPause = speed * 3
+      else if (/[!?][”"']?$/.test(word)) punctuationPause = speed * 1.5
+      else if (/[:][”"']?$/.test(word)) punctuationPause = speed * 0.7
+      else if (/[—–][”"']?$/.test(word)) punctuationPause = speed * 0.8
+      else if (/[,][”"']?$/.test(word)) punctuationPause = speed * 1.1
+      else if (/[;][”"']?$/.test(word)) punctuationPause = speed * 0.55
+      else if (/[)][”"']?$/.test(word)) punctuationPause = speed * 0.45
+      cumulativeDelay += speed + punctuationPause
     }
+    return delay
   })
-  const [connectTarget, setConnectTarget] = useState(null)
-  const [connectStep, setConnectStep] = useState('login')
-  const [analysisStep, setAnalysisStep] = useState(0)
-  const [selectedStrategy, setSelectedStrategy] = useState(0)
-
-  useEffect(() => {
-    localStorage.setItem('vetra-linked-programs', JSON.stringify(linked))
-  }, [linked])
-
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-  }, [phase])
-
-  useEffect(() => {
-    if (phase !== 'analysis') return undefined
-    setAnalysisStep(0)
-    const timer = window.setInterval(() => {
-      setAnalysisStep((current) => {
-        if (current >= analysisStages.length) {
-          window.clearInterval(timer)
-          window.setTimeout(() => setPhase('results'), 500)
-          return current
-        }
-        return current + 1
-      })
-    }, 620)
-    return () => window.clearInterval(timer)
-  }, [phase])
-
-  const linkedPrograms = useMemo(
-    () => programs.filter((program) => linked.includes(program.id)),
-    [linked],
+  return (
+    <span className={`word-reveal ${instant ? 'word-reveal--instant' : ''} ${className}`} aria-label={children}>
+      {words.map((word, index) => (
+        <span
+          aria-hidden="true"
+          key={`${word}-${index}`}
+          style={{ '--word-delay': `${delays[index]}ms` }}
+          onAnimationEnd={index === words.length - 1 ? onComplete : undefined}
+        >
+          {word}&nbsp;
+        </span>
+      ))}
+    </span>
   )
-  const totalBalance = linkedPrograms.reduce((sum, program) => sum + program.balance, 0)
-  const hardConstraintCount = tripBrief?.constraints?.filter((item) => item.hard).length || 2
-  const tripTitle = tripBrief?.routeCities?.length
-    ? tripBrief.routeCities.slice(1, -1).join(' · ')
-    : 'Flight brief'
+}
 
-  const submitBrief = async () => {
-    if (!draft.trim()) return
-    const submitted = draft.trim()
-    const isDemoBrief = isCanonicalDemoBrief(submitted)
-    setSubmittedPrompt(submitted)
-    setParseError('')
-    setPhase('parsing')
+function App() {
+  const [phase, setPhase] = useState(DEV_ADJUST_MODE ? 'adjust' : DEV_STEP3_MODE ? 'intake' : 'welcome')
+  const [draft, setDraft] = useState(DEV_STEP3_MODE ? DEV_STEP3_BRIEF : '')
+  const [brief, setBrief] = useState(DEV_ADJUST_BRIEF)
+  const [followUp, setFollowUp] = useState(null)
+  const [linked, setLinked] = useState([])
+  const [linking, setLinking] = useState([])
+  const [optimizationStep, setOptimizationStep] = useState(0)
+  const [optimizationFinishing, setOptimizationFinishing] = useState(false)
+  const [expandedResult, setExpandedResult] = useState(0)
+  const [transitioning, setTransitioning] = useState(null)
+  const [rewardsReady, setRewardsReady] = useState(false)
+  const [preliminaryLegCount, setPreliminaryLegCount] = useState(0)
+  const [interpretationReady, setInterpretationReady] = useState(false)
+  const [interpretationError, setInterpretationError] = useState('')
+  const [interpretationDuration, setInterpretationDuration] = useState(0)
+  const [adjustmentError, setAdjustmentError] = useState('')
+  const [changedLegIds, setChangedLegIds] = useState([])
+  const [adjustmentCopyComplete, setAdjustmentCopyComplete] = useState(false)
+  const [reviewCopyComplete, setReviewCopyComplete] = useState(false)
+  const [reviewLegCapacity, setReviewLegCapacity] = useState(Math.max(DEV_ADJUST_BRIEF?.flightLegs?.length || 0, 3))
+  const [introCopyComplete, setIntroCopyComplete] = useState(DEV_STEP3_MODE || DEV_ADJUST_MODE)
+  const [introExiting, setIntroExiting] = useState(false)
+  const introTimers = useRef([])
+  const linkTimers = useRef([])
+  const transitionTimers = useRef([])
+  const optimizationTimer = useRef(null)
+  const resultTimer = useRef(null)
+  const introCompleteRef = useRef(DEV_STEP3_MODE || DEV_ADJUST_MODE)
+  const interpretationController = useRef(null)
+  const adjustmentController = useRef(null)
 
-    try {
-      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-      const response = await fetch(`${apiBaseUrl}/api/parse-trip`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brief: submitted }),
-      })
-      const payload = await response.json()
-      if (!response.ok) throw new Error(payload.error || 'GPT parsing failed')
-      if (!Array.isArray(payload.routeCities) || !Array.isArray(payload.constraints)) {
-        throw new Error('GPT returned an invalid brief')
-      }
-      setTripBrief(payload)
-    } catch (error) {
-      if (isDemoBrief) {
-        setTripBrief(DEMO_INTERPRETATION)
-        setParseError('GPT was unavailable, so Vetra loaded the matching scripted interpretation for this demo brief.')
+  const scheduleTransition = (callback, delay) => {
+    const timer = window.setTimeout(() => {
+      transitionTimers.current = transitionTimers.current.filter((timerId) => timerId !== timer)
+      callback()
+    }, delay)
+    transitionTimers.current.push(timer)
+    return timer
+  }
+
+  const clearTransitionTimers = () => {
+    transitionTimers.current.forEach(window.clearTimeout)
+    transitionTimers.current = []
+  }
+
+  useEffect(() => {
+    if (DEV_ADJUST_MODE) return undefined
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setPhase('intake')
+      return undefined
+    }
+    return () => introTimers.current.forEach(window.clearTimeout)
+  }, [])
+
+  const movePastIntroCopy = (currentPhase = phase) => {
+    introTimers.current.forEach(window.clearTimeout)
+    introTimers.current = []
+    if (currentPhase === 'welcome') {
+      setIntroExiting(true)
+      const timer = window.setTimeout(() => {
+        setPhase('prompt')
+        setIntroExiting(false)
+        setIntroCopyComplete(false)
+        introCompleteRef.current = false
+      }, MOTION.copyExit)
+      introTimers.current.push(timer)
+    } else if (currentPhase === 'prompt') {
+      setPhase('intake')
+    }
+  }
+
+  const finishIntroCopy = () => {
+    if (introCompleteRef.current) return
+    introCompleteRef.current = true
+    setIntroCopyComplete(true)
+    const hold = phase === 'welcome' ? MOTION.welcomeHold : MOTION.promptHold
+    const timer = window.setTimeout(() => movePastIntroCopy(phase), hold)
+    introTimers.current.push(timer)
+  }
+
+  useEffect(() => {
+    if (phase !== 'welcome' && phase !== 'prompt') return undefined
+    const advance = () => {
+      if (!introCompleteRef.current) finishIntroCopy()
+      else movePastIntroCopy(phase)
+    }
+    window.addEventListener('keydown', advance)
+    return () => window.removeEventListener('keydown', advance)
+  }, [phase, introCopyComplete])
+
+  useEffect(() => () => {
+    interpretationController.current?.abort()
+    adjustmentController.current?.abort()
+    linkTimers.current.forEach(window.clearTimeout)
+    transitionTimers.current.forEach(window.clearTimeout)
+    if (optimizationTimer.current) window.clearTimeout(optimizationTimer.current)
+    if (resultTimer.current) window.clearTimeout(resultTimer.current)
+  }, [])
+
+  useEffect(() => {
+    if (phase !== 'building' || !brief || !interpretationReady || !brief.flightLegs?.length) return undefined
+
+    const legCount = brief.flightLegs.length
+    const timers = []
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const rowBeat = reducedMotion
+      ? 240
+      : Math.round(Math.min(
+        MOTION.preliminaryMaxBeat,
+        Math.max(MOTION.preliminaryMinBeat, interpretationDuration / legCount),
+      ))
+    const resolveDuration = reducedMotion ? 20 : MOTION.preliminaryResolve
+    const finalHold = reducedMotion ? 160 : MOTION.preliminaryHold
+    setPreliminaryLegCount(0)
+
+    for (let index = 0; index < legCount; index += 1) {
+      timers.push(scheduleTransition(
+        () => setPreliminaryLegCount(index + 1),
+        rowBeat * (index + 1),
+      ))
+    }
+
+    const finalRowStart = rowBeat * legCount
+    timers.push(scheduleTransition(() => {
+      if (followUp) {
+        setPhase('followup')
       } else {
-        setTripBrief(null)
-        setParseError('Vetra could not interpret this brief. Nothing has been inferred or substituted—edit the brief and try again.')
+        setPhase('rewards')
+        setRewardsReady(false)
+        scheduleTransition(() => setRewardsReady(true), MOTION.rewardsReveal)
+      }
+    }, finalRowStart + resolveDuration + finalHold))
+
+    return () => {
+      timers.forEach(window.clearTimeout)
+      transitionTimers.current = transitionTimers.current.filter((timer) => !timers.includes(timer))
+    }
+  }, [phase, brief, followUp, interpretationDuration, interpretationReady])
+
+  useEffect(() => {
+    if (phase !== 'optimizing') return undefined
+    setOptimizationStep(0)
+    setOptimizationFinishing(false)
+    let currentStep = 0
+    const advanceOptimization = () => {
+      optimizationTimer.current = window.setTimeout(() => {
+        if (currentStep >= optimizationStages.length - 1) {
+          setOptimizationFinishing(true)
+          resultTimer.current = window.setTimeout(() => setPhase('results'), MOTION.optimizationExit)
+          return
+        }
+        currentStep += 1
+        setOptimizationStep(currentStep)
+        advanceOptimization()
+      }, MOTION.optimizationStages[currentStep])
+    }
+    advanceOptimization()
+    return () => {
+      if (optimizationTimer.current) {
+        window.clearTimeout(optimizationTimer.current)
+        optimizationTimer.current = null
+      }
+      if (resultTimer.current) {
+        window.clearTimeout(resultTimer.current)
+        resultTimer.current = null
       }
     }
-    setPhase('constraints')
+  }, [phase])
+
+  const linkedPrograms = useMemo(() => programs.filter((program) => linked.includes(program.id)), [linked])
+  const totalBalance = linkedPrograms.reduce((total, program) => total + program.balance, 0)
+  const itineraryIssues = useMemo(() => validateItinerary(brief?.flightLegs || []), [brief])
+
+  const submitTrip = () => {
+    if (!draft.trim() || transitioning) return
+    const submitted = draft.trim()
+    interpretationController.current?.abort()
+    const controller = new AbortController()
+    interpretationController.current = controller
+    setBrief({
+      raw: submitted,
+      travelers: 'Not Specified',
+      flexibility: 'Not Specified',
+      flightLegs: [],
+      followUpQuestions: [],
+    })
+    setFollowUp(null)
+    setInterpretationReady(false)
+    setInterpretationError('')
+    setInterpretationDuration(0)
+    setTransitioning('capture')
+    const interpretationStartedAt = Date.now()
+
+    interpretTrip(submitted, { signal: controller.signal })
+      .then((intent) => {
+        if (controller.signal.aborted) return
+        const interpretedBrief = toUiTripBrief(intent, submitted)
+        const firstQuestion = interpretedBrief.followUpQuestions[0]
+        setBrief(interpretedBrief)
+        setFollowUp(firstQuestion ? {
+          key: firstQuestion.field,
+          scope: firstQuestion.scope,
+          question: firstQuestion.question,
+        } : null)
+        setInterpretationDuration(Date.now() - interpretationStartedAt)
+        setInterpretationReady(true)
+      })
+      .catch((error) => {
+        if (error.name === 'AbortError') return
+        setInterpretationError('I couldn’t structure that trip reliably. Start over and try the request again.')
+      })
+
+    scheduleTransition(() => {
+      setDraft('')
+      setPreliminaryLegCount(0)
+      setPhase('building')
+      setTransitioning(null)
+    }, MOTION.capture)
   }
 
-  const openConnect = (program) => {
-    setConnectTarget(program)
-    setConnectStep('login')
+  const submitFollowUp = () => {
+    if (!draft.trim() || transitioning) return
+    const answer = draft.trim()
+    if (/destination|city|airport|location/i.test(followUp?.key || '') && !isPlausibleCityAnswer(answer, followUp?.scope)) {
+      setInterpretationError(`Please name a city within ${followUp?.scope || 'that area'}.`)
+      return
+    }
+    setInterpretationError('')
+    setTransitioning('resolving')
+    scheduleTransition(() => {
+      const updatedBrief = applyFollowUpToBrief(brief, followUp, answer)
+      const nextQuestion = updatedBrief.followUpQuestions[0]
+      setBrief(updatedBrief)
+      setTransitioning('resolved')
+      scheduleTransition(() => {
+        setDraft('')
+        setTransitioning(null)
+        if (nextQuestion) {
+          setFollowUp({ key: nextQuestion.field, scope: nextQuestion.scope, question: nextQuestion.question })
+          setPhase('followup')
+        } else {
+          setPhase('rewards')
+          setFollowUp(null)
+          setRewardsReady(false)
+          scheduleTransition(() => setRewardsReady(true), MOTION.rewardsReveal)
+        }
+      }, MOTION.followUpSettle)
+    }, MOTION.followUpProcess)
   }
 
-  const completeConnection = () => {
-    setConnectStep('syncing')
-    window.setTimeout(() => {
-      setLinked((current) =>
-        current.includes(connectTarget.id) ? current : [...current, connectTarget.id],
-      )
-      setConnectStep('done')
-    }, 700)
+  const toggleProgram = (programId) => {
+    if (linking.includes(programId)) return
+    if (linked.includes(programId)) {
+      setLinked((current) => current.filter((id) => id !== programId))
+      return
+    }
+    setLinking((current) => [...current, programId])
+    const timer = window.setTimeout(() => {
+      setLinked((current) => [...current, programId])
+      setLinking((current) => current.filter((id) => id !== programId))
+      linkTimers.current = linkTimers.current.filter((timerId) => timerId !== timer)
+    }, MOTION.programLink)
+    linkTimers.current.push(timer)
   }
 
-  const disconnect = (programId) => {
-    setLinked((current) => current.filter((id) => id !== programId))
+  const finishRewards = () => {
+    if (transitioning) return
+    setReviewLegCapacity(Math.max(brief?.flightLegs?.length || 0, 3))
+    setTransitioning('rewards-exit')
+    scheduleTransition(() => {
+      setPhase('adjust')
+      setAdjustmentCopyComplete(false)
+      setReviewCopyComplete(false)
+      setTransitioning(null)
+    }, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 20 : MOTION.copyExit)
   }
 
-  const resetDemo = () => {
-    setPhase('welcome')
-    setDraft(DEMO_PROMPT)
-    setSubmittedPrompt(DEMO_PROMPT)
-    setTripBrief(DEMO_INTERPRETATION)
-    setParseError('')
-    setSelectedStrategy(0)
-    setAnalysisStep(0)
+  const submitAdjustment = () => {
+    if (!draft.trim() || transitioning || !brief) return
+    const request = draft.trim()
+    adjustmentController.current?.abort()
+    const controller = new AbortController()
+    adjustmentController.current = controller
+    setTransitioning('adjusting')
+    setAdjustmentError('')
+    setChangedLegIds([])
+    const startedAt = Date.now()
+
+    interpretItineraryAdjustment(request, brief, { signal: controller.signal })
+      .then((adjustment) => {
+        if (controller.signal.aborted) return
+        const wait = Math.max(0, MOTION.adjustmentMinProcess - (Date.now() - startedAt))
+        scheduleTransition(() => {
+          try {
+            const result = applyItineraryOperations(brief, adjustment)
+            setBrief(result.brief)
+            setChangedLegIds(result.changedLegIds)
+            setDraft('')
+            setTransitioning('adjusted')
+            scheduleTransition(() => {
+              setReviewCopyComplete(false)
+              setPhase('review')
+              setTransitioning(null)
+            }, MOTION.adjustmentSettle)
+          } catch (error) {
+            setTransitioning(null)
+            setAdjustmentError(error.message)
+          }
+        }, wait)
+      })
+      .catch((error) => {
+        if (error.name === 'AbortError') return
+        setTransitioning(null)
+        setAdjustmentError('I couldn’t tell what to change. Try naming the stop, date, or cabin.')
+      })
   }
 
-  const resetFirstTimeDemo = () => {
-    localStorage.removeItem('vetra-linked-programs')
+  const reviewWithoutChanges = () => {
+    setDraft('')
+    setAdjustmentError('')
+    setReviewCopyComplete(false)
+    setPhase('review')
+  }
+
+  const makeMoreChanges = () => {
+    setChangedLegIds([])
+    setAdjustmentError('')
+    setAdjustmentCopyComplete(false)
+    setReviewCopyComplete(false)
+    setPhase('adjust')
+  }
+
+  const beginOptimization = () => {
+    if (transitioning || itineraryIssues.length) return
+    setTransitioning('awards-exit')
+    scheduleTransition(() => {
+      setPhase('optimizing')
+      setTransitioning(null)
+    }, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 20 : MOTION.awardsExit)
+  }
+
+  const reset = () => {
+    interpretationController.current?.abort()
+    adjustmentController.current?.abort()
+    interpretationController.current = null
+    introTimers.current.forEach(window.clearTimeout)
+    linkTimers.current.forEach(window.clearTimeout)
+    linkTimers.current = []
+    clearTransitionTimers()
+    if (optimizationTimer.current) window.clearTimeout(optimizationTimer.current)
+    optimizationTimer.current = null
+    if (resultTimer.current) window.clearTimeout(resultTimer.current)
+    resultTimer.current = null
+    setDraft(DEV_STEP3_MODE ? DEV_STEP3_BRIEF : '')
+    setBrief(null)
+    setFollowUp(null)
     setLinked([])
-    resetDemo()
+    setLinking([])
+    setOptimizationStep(0)
+    setOptimizationFinishing(false)
+    setTransitioning(null)
+    setRewardsReady(false)
+    setPreliminaryLegCount(0)
+    setInterpretationReady(false)
+    setInterpretationError('')
+    setInterpretationDuration(0)
+    setAdjustmentError('')
+    setChangedLegIds([])
+    setAdjustmentCopyComplete(false)
+    setReviewCopyComplete(false)
+    setReviewLegCapacity(3)
+    setIntroCopyComplete(true)
+    introCompleteRef.current = true
+    setPhase('intake')
   }
 
-  if (phase === 'welcome') {
-    return <Welcome draft={draft} setDraft={setDraft} onSubmit={submitBrief} />
-  }
+  const isIntro = ['welcome', 'prompt', 'intake'].includes(phase)
+  const workspacePhase = ['building', 'followup', 'rewards', 'adjust', 'review'].includes(phase)
+  const requestedLegs = brief?.flightLegs || []
+  const adjustmentBusy = transitioning === 'adjusting' || transitioning === 'adjusted'
+  const reviewBlocked = itineraryIssues.length > 0
+  const primaryIssueType = itineraryIssues[0]?.type
+  const blockedReviewHeading = primaryIssueType === 'city'
+    ? 'One stop still needs a city.'
+    : primaryIssueType === 'timing'
+      ? 'One date falls out of sequence.'
+      : 'One connection needs a little more detail.'
+  const blockedStatusLabel = primaryIssueType === 'city'
+    ? 'City needed'
+    : primaryIssueType === 'timing'
+      ? 'Timing issue'
+      : 'Continuity issue'
 
   return (
-    <div className="app-shell">
-      <Sidebar
-        phase={phase}
-        linkedPrograms={linkedPrograms}
-        totalBalance={totalBalance}
-        onReset={resetDemo}
-        onResetFirstTime={resetFirstTimeDemo}
-      />
-      <main className="main-panel">
-        <Topbar phase={phase} linkedCount={linkedPrograms.length} tripTitle={tripTitle} />
-        {phase === 'parsing' && <ParsingView prompt={submittedPrompt} />}
-        {phase === 'constraints' && (
-          <ConstraintsView
-            prompt={submittedPrompt}
-            tripBrief={tripBrief}
-            parseError={parseError}
-            canContinue={isCanonicalDemoBrief(submittedPrompt) && Boolean(tripBrief)}
-            onEdit={() => {
-              setDraft(submittedPrompt)
-              setPhase('welcome')
-            }}
-            onConfirm={() => setPhase('programs')}
-          />
-        )}
-        {phase === 'programs' && (
-          <ProgramsView
-            linked={linked}
-            onConnect={openConnect}
-            onDisconnect={disconnect}
-            onContinue={() => setPhase('ready')}
-          />
-        )}
-        {phase === 'ready' && (
-          <ReadyView
-            linkedPrograms={linkedPrograms}
-            totalBalance={totalBalance}
-            hardConstraintCount={hardConstraintCount}
-            onBack={() => setPhase('programs')}
-            onAnalyze={() => setPhase('analysis')}
-          />
-        )}
-        {phase === 'analysis' && <AnalysisView step={analysisStep} />}
-        {phase === 'results' && (
-          <ResultsView selected={selectedStrategy} setSelected={setSelectedStrategy} hardConstraintCount={hardConstraintCount} />
-        )}
-      </main>
-      {connectTarget && (
-        <ConnectionModal
-          program={connectTarget}
-          step={connectStep}
-          onConnect={completeConnection}
-          onClose={() => setConnectTarget(null)}
-        />
-      )}
-    </div>
-  )
-}
-
-function Welcome({ draft, setDraft, onSubmit }) {
-  return (
-    <div className="welcome">
-      <div className="welcome-nav">
+    <div className={`app app--${phase} ${transitioning ? `app--transition-${transitioning}` : ''}`}>
+      <header className="app-header">
         <Brand />
-        <div className="welcome-nav__right">
-          <span className="demo-chip"><Sparkles size={12} /> Interactive prototype</span>
-          <span className="welcome-nav__divider" />
-          <span className="avatar-button" aria-label="Personal demo workspace">BC</span>
-        </div>
-      </div>
+        {!isIntro && (
+          <button className="reset-button" onClick={reset}><RotateCcw size={14} /> Start over</button>
+        )}
+      </header>
 
-      <div className="welcome-orbit welcome-orbit--one" />
-      <div className="welcome-orbit welcome-orbit--two" />
-      <div className="welcome-glow" />
-
-      <section className="welcome-content">
-        <div className="eyebrow"><Sparkles size={14} /> Award intelligence, personalized</div>
-        <h1>Tell me where you need to be.<br />I’ll work out the points.</h1>
-        <p className="welcome-lede">
-          Vetra reasons across your balances, transfer partners, award pricing, and cash fares to
-          find the strongest complete flight strategy.
-        </p>
-
-        <div className="prompt-box">
-          <textarea
-            aria-label="Describe your trip"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) onSubmit()
-            }}
-          />
-          <div className="prompt-box__footer">
-            <div className="prompt-hints">
-              <span><Plane size={14} /> Multi-city</span>
-              <span><Clock3 size={14} /> Hard constraints</span>
+      {isIntro && (
+        <main
+          className={`intro intro--${phase}`}
+          onPointerDown={phase === 'welcome' || phase === 'prompt' ? () => {
+            if (!introCompleteRef.current) finishIntroCopy()
+            else movePastIntroCopy(phase)
+          } : undefined}
+        >
+          <div className="ambient-glow" />
+          <section className="intro-content" aria-live="polite">
+            {phase === 'welcome' && (
+              <h1 key="welcome" className={introExiting ? 'intro-copy--exiting' : ''}>
+                <WordReveal speed={MOTION.welcomeWord} instant={introCopyComplete} onComplete={finishIntroCopy}>{WELCOME_COPY}</WordReveal>
+              </h1>
+            )}
+            {(phase === 'prompt' || phase === 'intake') && (
+              <h1 key="prompt">
+                <WordReveal speed={MOTION.promptWord} instant={introCopyComplete || phase === 'intake'} onComplete={phase === 'prompt' ? finishIntroCopy : undefined}>{PROMPT_COPY}</WordReveal>
+              </h1>
+            )}
+            <div className="intro-composer-wrap">
+              <TripComposer
+                value={draft}
+                onChange={setDraft}
+                onSubmit={submitTrip}
+                placeholder="I’m flying from New York to Tokyo on October 8…"
+                large
+                autoFocus={phase === 'intake'}
+                busy={transitioning === 'capture'}
+                busyLabel="Capturing your trip…"
+              />
             </div>
-            <button className="send-button" onClick={onSubmit} aria-label="Send trip brief">
-              <ArrowRight size={20} />
-            </button>
-          </div>
-        </div>
-        <div className="prompt-footnote">
-          <span><ShieldCheck size={14} /> Program connections and inventory are simulated</span>
-          <span>⌘ + Enter to send</span>
-        </div>
-      </section>
+          </section>
+        </main>
+      )}
 
-      <footer className="welcome-footer">
-        <span>Built for people who know their points</span>
-        <div>
-          <span>9 transfer ecosystems</span>
-          <span>·</span>
-          <span>100+ airline programs</span>
-          <span>·</span>
-          <span>Illustrative award logic</span>
-        </div>
-      </footer>
-    </div>
-  )
-}
-
-function Sidebar({ phase, linkedPrograms, totalBalance, onReset, onResetFirstTime }) {
-  return (
-    <aside className="sidebar">
-      <div>
-        <Brand compact />
-        <button className="new-search" onClick={onReset}>
-          <Plus size={16} /> New search
-        </button>
-      </div>
-
-      <nav className="sidebar-nav">
-        <span className="sidebar-label">Workspace</span>
-        <div className={phase === 'results' ? '' : 'active'}>
-          <MessageSquareText size={17} /> Current search
-          <span className="nav-dot" />
-        </div>
-        <div className={phase === 'results' ? 'active' : ''}>
-          <Route size={17} /> Recommendations
-          {phase === 'results' && <span className="nav-count">3</span>}
-        </div>
-      </nav>
-
-      <div className="sidebar-wallet">
-        <div className="sidebar-wallet__head">
-          <span className="sidebar-label">Linked balances</span>
-        </div>
-        {linkedPrograms.length ? (
-          <>
-            <strong>{formatNumber(totalBalance)}</strong>
-            <small>points and miles available</small>
-            <div className="mini-programs">
-              {linkedPrograms.slice(0, 4).map((program) => (
-                <span
-                  key={program.id}
-                  style={{ background: program.color }}
-                  title={program.program}
-                >
-                  {program.mark}
-                </span>
-              ))}
-            </div>
-          </>
-        ) : (
-          <div className="wallet-empty">
-            <WalletCards size={20} />
-            <span>No programs linked yet</span>
-          </div>
-        )}
-      </div>
-
-      <div className="sidebar-bottom">
-        <button className="demo-reset" onClick={onResetFirstTime}>Reset first-time demo data</button>
-        <div className="sidebar-security"><ShieldCheck size={15} /> Demo balances stay local</div>
-        <div className="sidebar-profile">
-          <span>BC</span>
-          <div><strong>Ben Cohen</strong><small>Personal workspace</small></div>
-        </div>
-      </div>
-    </aside>
-  )
-}
-
-function Topbar({ phase, linkedCount, tripTitle }) {
-  const steps = [
-    { id: 'constraints', label: 'Brief' },
-    { id: 'programs', label: 'Balances' },
-    { id: 'ready', label: 'Review' },
-    { id: 'analysis', label: 'Analysis' },
-    { id: 'results', label: 'Results' },
-  ]
-  const current = Math.max(0, steps.findIndex((step) => step.id === phase))
-  return (
-    <header className="topbar">
-      <div>
-        <span className="topbar-kicker">Current search</span>
-        <strong>{tripTitle}</strong>
-      </div>
-      <div className="progress-steps" aria-label="Search progress">
-        {steps.map((step, index) => (
-          <div key={step.id} className={index <= current ? 'complete' : ''}>
-            <span>{index < current ? <Check size={11} /> : index + 1}</span>
-            <small>{step.label}</small>
-          </div>
-        ))}
-      </div>
-      <div className="topbar-status">
-        <span className="demo-dot" />
-        Demo mode · {linkedCount ? `${linkedCount} programs linked` : 'simulated data'}
-      </div>
-    </header>
-  )
-}
-
-function ConversationFrame({ children }) {
-  return <div className="conversation">{children}</div>
-}
-
-function UserMessage({ children }) {
-  return (
-    <div className="message message--user">
-      <div className="message-avatar message-avatar--user">BC</div>
-      <div><span className="message-name">You</span><div className="user-bubble">{children}</div></div>
-    </div>
-  )
-}
-
-function VetraMessage({ children }) {
-  return (
-    <div className="message message--vetra">
-      <div className="message-avatar"><div className="brand-mark brand-mark--small"><span /><span /></div></div>
-      <div><span className="message-name">Vetra</span><div className="vetra-bubble">{children}</div></div>
-    </div>
-  )
-}
-
-function ParsingView({ prompt }) {
-  return (
-    <ConversationFrame>
-      <UserMessage>{prompt}</UserMessage>
-      <VetraMessage>
-        <div className="gpt-thinking">
-          <div className="gpt-thinking__orb"><Sparkles size={18} /></div>
-          <div>
-            <strong>Understanding your flight brief</strong>
-            <span>GPT is separating hard constraints from preferences…</span>
-          </div>
-          <div className="thinking-dots"><i /><i /><i /></div>
-        </div>
-      </VetraMessage>
-    </ConversationFrame>
-  )
-}
-
-function ConstraintsView({ prompt, tripBrief, parseError, canContinue, onEdit, onConfirm }) {
-  const parsedConstraints = tripBrief?.constraints || []
-  const routeCities = tripBrief?.routeCities || []
-  return (
-    <ConversationFrame>
-      <UserMessage>{prompt}</UserMessage>
-      <VetraMessage>
-        <p>{tripBrief?.assistantMessage || 'I couldn’t create a reliable flight brief from that request.'}</p>
-        {parseError && <div className="parse-fallback"><Info size={13} /> {parseError}</div>}
-        {!canContinue && tripBrief && (
-          <div className="prototype-boundary">
-            <AlertTriangle size={16} />
-            <div><strong>Parsed, but outside this prototype’s modeled scenario</strong><span>The GPT interpretation is shown for inspection. Mock optimization is only available for the prefilled Tokyo–Seoul–Honolulu brief, so Vetra will not substitute unrelated results.</span></div>
-          </div>
-        )}
-        {!tripBrief && (
-          <div className="prototype-boundary">
-            <AlertTriangle size={16} />
-            <div><strong>No trip brief was created</strong><span>Edit your request and retry. Vetra has not inferred a route or loaded fallback constraints.</span></div>
-          </div>
-        )}
-        {tripBrief && (
-        <div className="interpretation-card">
-          <div className="interpretation-card__head">
-            <div><Sparkles size={16} /><strong>My understanding</strong></div>
-            <span className={tripBrief?.meta?.poweredBy ? 'gpt-powered' : ''}>
-              {tripBrief?.meta?.poweredBy && <Zap size={10} />}
-              {tripBrief?.meta?.poweredBy
-                ? `${parsedConstraints.length} constraints · GPT-5.4 interpreted`
-                : `${parsedConstraints.length} constraints extracted`}
-            </span>
-          </div>
-          <div className="route-strip">
-            {routeCities.map((city, index, list) => (
-              <div className="route-stop" key={`${city}-${index}`}>
-                <span className={index === 1 ? 'route-stop__hard' : ''}>{index + 1}</span>
-                <strong>{city}</strong>
-                {index < list.length - 1 && <div className="route-connector"><Plane size={13} /></div>}
+      {workspacePhase && brief && (
+        <main className="journey-shell">
+          <section className={`journey-conversation ${['rewards', 'adjust', 'review'].includes(phase) ? 'journey-conversation--rewards' : ''}`}>
+            {phase === 'building' && (
+              <div className="step-label" key={`${phase}-label`}>
+                Building your trip
               </div>
-            ))}
-          </div>
-          <div className="constraint-grid">
-            {parsedConstraints.map((constraint) => (
-              <div className="constraint-item" key={`${constraint.label}-${constraint.value}`}>
-                <div className="constraint-icon">
-                  {constraint.icon === 'route' && <Route size={17} />}
-                  {constraint.icon === 'date' && <Clock3 size={17} />}
-                  {constraint.icon === 'cabin' && <Star size={17} />}
-                  {constraint.icon === 'flex' && <RefreshCw size={17} />}
-                  {constraint.icon === 'traveler' && <span>1</span>}
-                </div>
-                <div><small>{constraint.label}{constraint.hard && <em>Hard</em>}</small><strong>{constraint.value}</strong></div>
-              </div>
-            ))}
-          </div>
-          <div className="interpretation-card__footer">
-            <button className="secondary-button" onClick={onEdit}>Edit brief</button>
-            <button className="primary-button" disabled={!canContinue} onClick={onConfirm}>That’s right <ArrowRight size={16} /></button>
-          </div>
-        </div>
-        )}
-        {!tripBrief && <button className="secondary-button" onClick={onEdit}>Edit brief</button>}
-      </VetraMessage>
-    </ConversationFrame>
-  )
-}
+            )}
+            {phase === 'adjust' && <div className="step-label">Final check</div>}
+            {phase === 'review' && <div className="step-label">{reviewBlocked ? 'Action needed' : 'Ready to search'}</div>}
+            <h1 className={`journey-question ${['rewards', 'adjust', 'review'].includes(phase) ? 'journey-question--rewards' : ''}`} key={phase}>
+              <WordReveal
+                speed={phase === 'building' ? 76 : phase === 'adjust' ? MOTION.adjustmentCopy : MOTION.questionWord}
+                onComplete={phase === 'adjust'
+                  ? () => setAdjustmentCopyComplete(true)
+                  : phase === 'review'
+                    ? () => setReviewCopyComplete(true)
+                    : undefined}
+              >
+                {phase === 'building'
+                  ? interpretationError || 'I’m building a preliminary itinerary.'
+                  : phase === 'followup'
+                  ? followUp.question
+                  : phase === 'rewards'
+                    ? 'Let’s link.'
+                    : phase === 'adjust'
+                      ? 'Anything you’d like to change before I search?'
+                      : reviewBlocked
+                        ? blockedReviewHeading
+                        : 'Your itinerary is ready.'}
+              </WordReveal>
+            </h1>
+            {phase === 'rewards' && (
+              <p className="rewards-subheader">Connect your airline and card rewards programs.</p>
+            )}
+            {phase === 'building' && (
+              <p className="journey-support" key={`${phase}-support`}>
+                {interpretationError
+                  ? 'No itinerary details were substituted or guessed.'
+                  : 'Mapping your route into complete flight legs'}
+              </p>
+            )}
+            {phase === 'adjust' && (
+              <p className="rewards-subheader">Add or remove flight legs alongside editing the timing and cabin details of an existing one.</p>
+            )}
+            {phase === 'review' && (
+              <p className="rewards-subheader" id="itinerary-readiness-description">
+                {reviewBlocked ? itineraryIssues[0].message : 'I’ll compare cash and award options across every complete route.'}
+              </p>
+            )}
 
-function ProgramsView({ linked, onConnect, onDisconnect, onContinue }) {
-  const linkedCount = linked.length
-  const missingRequired = REQUIRED_DEMO_PROGRAM_IDS.filter((id) => !linked.includes(id))
-  const requiredReady = missingRequired.length === 0
-  return (
-    <ConversationFrame>
-      <VetraMessage>
-        <p>Great. Next, connect the balances used by this modeled scenario. The recommendations will only use balances shown in your wallet.</p>
-        <div className="security-note"><LockKeyhole size={16} /><div><strong>Simulated connections for this prototype</strong><span>No airline credentials are requested or transmitted. Balances are sample data saved in this browser.</span></div></div>
-      </VetraMessage>
-
-      <div className="program-section">
-        <div className="section-heading">
-          <div><span className="section-kicker">Your wallet</span><h2>Connect programs</h2></div>
-          <span className="selection-count"><strong>{linkedCount}</strong> connected</span>
-        </div>
-        <div className="program-grid">
-          {programs.map((program) => {
-            const isLinked = linked.includes(program.id)
-            const isRequired = REQUIRED_DEMO_PROGRAM_IDS.includes(program.id)
-            return (
-              <div className={`program-card ${isLinked ? 'program-card--linked' : ''}`} key={program.id}>
-                <div className="program-card__top">
-                  <div className="program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</div>
-                  {isLinked ? <span className="connected-pill"><Check size={12} /> Connected</span> : <span className="program-type">{isRequired ? 'Needed for demo' : program.type}</span>}
-                </div>
-                <div className="program-card__name"><strong>{program.name}</strong><span>{program.program}</span></div>
-                {isLinked ? (
-                  <>
-                    <div className="program-balance"><strong>{formatNumber(program.balance)}</strong><span>Sample balance · saved locally</span></div>
-                    <button className="text-button danger" onClick={() => onDisconnect(program.id)}><Unplug size={13} /> Disconnect</button>
-                  </>
+            {phase === 'building' || phase === 'followup' ? (
+              <div className="journey-action-slot">
+                {phase === 'building' ? (
+                  (interpretationError || interpretationReady) && (
+                    <div className={`preliminary-progress ${preliminaryLegCount === requestedLegs.length ? 'complete' : ''}`} role="status" aria-live="polite">
+                      {interpretationError
+                        ? 'Trip interpretation stopped'
+                        : preliminaryLegCount < requestedLegs.length
+                          ? `Identifying flight leg ${preliminaryLegCount + 1} of ${requestedLegs.length}`
+                          : 'Preliminary itinerary assembled'}
+                    </div>
+                  )
                 ) : (
-                  <button className="connect-button" onClick={() => onConnect(program)}>Connect <ExternalLink size={14} /></button>
+                  <div className="followup-composer-wrap">
+                  <TripComposer
+                    value={draft}
+                    onChange={setDraft}
+                    onSubmit={submitFollowUp}
+                    placeholder={followUp.key === 'travelers' ? 'Just me' : 'Add the missing detail…'}
+                    autoFocus
+                    focusDelay={740}
+                    busy={transitioning === 'resolving' || transitioning === 'resolved'}
+                    busyLabel="Updating your itinerary…"
+                  />
+                  {interpretationError && <p className="inline-error"><CircleAlert size={13} /> {interpretationError}</p>}
+                  </div>
                 )}
               </div>
-            )
-          })}
-        </div>
-        <div className="program-section__footer">
-          <span>{requiredReady ? 'Amex, Chase, and Aeroplan can fund every modeled option' : `Connect the ${missingRequired.length} highlighted demo program${missingRequired.length === 1 ? '' : 's'} to continue`}</span>
-          <button className="primary-button" disabled={!requiredReady} onClick={onContinue}>Use these balances <ArrowRight size={16} /></button>
-        </div>
-      </div>
-    </ConversationFrame>
-  )
-}
-
-function ReadyView({ linkedPrograms, totalBalance, hardConstraintCount, onBack, onAnalyze }) {
-  return (
-    <ConversationFrame>
-      <VetraMessage>
-        <p>I have enough to start. I’ll treat your linked balances as the funding constraint, compare them with cash, and rank complete strategies—not isolated cheap segments.</p>
-        <div className="ready-card">
-          <div className="ready-card__hero">
-            <div className="ready-orb"><Sparkles size={27} /></div>
-            <div><span>Ready to optimize</span><h2>One trip. Every viable points path.</h2><p>Vetra will evaluate the itinerary as a whole, while enforcing your Tokyo arrival and business-class requirements.</p></div>
-          </div>
-          <div className="ready-metrics">
-            <div><small>Linked value pool</small><strong>{formatNumber(totalBalance)}</strong><span>points + miles</span></div>
-            <div><small>Programs in wallet</small><strong>{linkedPrograms.length}</strong><span>sample balances</span></div>
-            <div><small>Hard constraints</small><strong>{hardConstraintCount}</strong><span>must be satisfied</span></div>
-            <div><small>Travel legs</small><strong>4</strong><span>up to 5 flights</span></div>
-          </div>
-          <div className="ready-wallet-row">
-            {linkedPrograms.map((program) => (
-              <div key={program.id}><span className="program-logo program-logo--small" style={{ color: program.color, background: program.tint }}>{program.mark}</span><div><strong>{program.program}</strong><small>{formatNumber(program.balance)}</small></div></div>
-            ))}
-          </div>
-          <div className="ready-card__footer">
-            <button className="secondary-button" onClick={onBack}>Edit balances</button>
-            <button className="primary-button primary-button--large" onClick={onAnalyze}><Sparkles size={17} /> Optimize my trip</button>
-          </div>
-        </div>
-      </VetraMessage>
-    </ConversationFrame>
-  )
-}
-
-function AnalysisView({ step }) {
-  return (
-    <div className="analysis-view">
-      <div className="analysis-visual">
-        <div className="analysis-ring analysis-ring--outer" />
-        <div className="analysis-ring analysis-ring--inner" />
-        <div className="analysis-core"><div className="brand-mark"><span /><span /></div></div>
-        <span className="analysis-node analysis-node--one">JFK</span>
-        <span className="analysis-node analysis-node--two">HND</span>
-        <span className="analysis-node analysis-node--three">ICN</span>
-        <span className="analysis-node analysis-node--four">HNL</span>
-      </div>
-      <div className="analysis-copy">
-        <span className="section-kicker">Vetra is running the simulated award model</span>
-        <h1>Building complete strategies</h1>
-        <p>Checking each candidate against your constraints before comparing point value.</p>
-        <div className="analysis-stages">
-          {analysisStages.map((stage, index) => {
-            const complete = index < step
-            const active = index === step
-            return (
-              <div className={`${complete ? 'complete' : ''} ${active ? 'active' : ''}`} key={stage.label}>
-                <span className="stage-icon">{complete ? <Check size={14} /> : active ? <span className="spinner" /> : index + 1}</span>
-                <strong>{stage.label}</strong>
-                <small>{complete ? stage.detail : active ? 'In progress' : 'Waiting'}</small>
-              </div>
-            )
-          })}
-        </div>
-        <div className="analysis-note"><ShieldCheck size={15} /> No points are moved during analysis</div>
-      </div>
-    </div>
-  )
-}
-
-function ResultsView({ selected, setSelected, hardConstraintCount }) {
-  const [assumptionsStrategy, setAssumptionsStrategy] = useState(null)
-  return (
-    <div className="results-view">
-      <div className="simulation-banner"><Info size={15} /><span><strong>Interactive prototype</strong> Award inventory, prices, balances, and route counts below are simulated—not live airline availability.</span></div>
-      <div className="results-hero">
-        <div>
-          <span className="section-kicker"><Check size={13} /> Simulated analysis complete</span>
-          <h1>Three strong ways to book this trip</h1>
-          <p>All options satisfy your hard constraints. They’re ranked on value, execution risk, cabin quality, and use of your existing balances.</p>
-        </div>
-        <div className="results-summary">
-          <div><span>41</span><small>routes modeled</small></div>
-          <div><span>27</span><small>transfer paths modeled</small></div>
-          <div><span>{hardConstraintCount}</span><small>hard constraints met</small></div>
-        </div>
-      </div>
-
-      <div className="results-toolbar">
-        <div className="results-tabs"><span className="active">Ranked strategies</span></div>
-        <div className="results-actions"><span><Clock3 size={13} /> Oct 2026 · all times local</span></div>
-      </div>
-
-      <div className="strategy-list">
-        {strategies.map((strategy, index) => (
-          <StrategyCard
-            key={strategy.rank}
-            strategy={strategy}
-            expanded={selected === index}
-            onToggle={() => setSelected(selected === index ? -1 : index)}
-            onShowAssumptions={() => setAssumptionsStrategy(strategy)}
-          />
-        ))}
-      </div>
-
-      <div className="results-disclaimer"><Info size={14} /> Never transfer points from this prototype. A production version would revalidate bookable inventory and transfer ratios immediately before any transfer.</div>
-      {assumptionsStrategy && <AssumptionsModal strategy={assumptionsStrategy} onClose={() => setAssumptionsStrategy(null)} />}
-    </div>
-  )
-}
-
-function StrategyCard({ strategy, expanded, onToggle, onShowAssumptions }) {
-  return (
-    <article className={`strategy-card ${expanded ? 'strategy-card--expanded' : ''}`} style={{ '--strategy-accent': strategy.accent }}>
-      <button className="strategy-summary" onClick={onToggle}>
-        <div className="rank-block"><span>#{strategy.rank}</span><small>{strategy.label}</small></div>
-        <div className="strategy-title">
-          <span className="strategy-badge" style={{ color: strategy.accent, background: `${strategy.accent}12` }}>{strategy.label}</span>
-          <h2>{strategy.title}</h2>
-          <p>{strategy.subtitle}</p>
-        </div>
-        <div className="mini-route">
-          {['NYC', 'TYO', 'SEL', 'HNL', 'NYC'].map((code, index) => (
-            <div key={`${code}-${index}`}><span>{code}</span>{index < 4 && <i />}</div>
-          ))}
-        </div>
-        <div className="strategy-cost"><small>Total trip</small><strong>{formatNumber(strategy.points)} <em>pts</em></strong><span>+ ${formatNumber(strategy.fees)} fees</span></div>
-        <div className="strategy-value"><small>Point value</small><strong>{strategy.cpp.toFixed(2)}¢</strong><span>per point</span></div>
-        <div className="strategy-score"><div><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="18" /><circle className="score-fill" cx="22" cy="22" r="18" style={{ strokeDashoffset: 113 - (113 * strategy.score) / 100 }} /></svg><strong>{strategy.score}</strong></div><small>Vetra score</small></div>
-        <ChevronDown className={`expand-chevron ${expanded ? 'rotated' : ''}`} size={19} />
-      </button>
-
-      {expanded && (
-        <div className="strategy-detail">
-          <div className="decision-brief">
-            <div className="decision-icon"><Sparkles size={18} /></div>
-            <div><span>Why this ranks #{strategy.rank}</span><p>{strategy.reason}</p></div>
-            <div className="confidence-pill"><ShieldCheck size={14} /> {strategy.confidence}</div>
-          </div>
-
-          <div className="strategy-detail__grid">
-            <section className="itinerary-panel">
-              <div className="panel-heading"><div><span>Complete itinerary</span><strong>{strategy.segments.length} flights · 2026 local times</strong></div><span className="constraint-pass"><Check size={13} /> All constraints met</span></div>
-              {strategy.airportChanges.map((warning) => (
-                <div className="airport-warning" key={warning}><AlertTriangle size={14} /><span><strong>Airport change</strong> {warning}. Ground transport is not included.</span></div>
-              ))}
-              <div className="segment-list">
-                {strategy.segments.map((segment, index) => (
-                  <div className="segment" key={`${segment.from}-${segment.to}`}>
-                    <div className="segment-timeline"><span>{index + 1}</span>{index < strategy.segments.length - 1 && <i />}</div>
-                    <div className="segment-date">{segment.date}</div>
-                    <div className="segment-route"><strong>{segment.from}</strong><div><Plane size={14} /><span>{segment.time}</span></div><strong>{segment.to}</strong></div>
-                    <div className="segment-airline"><strong>{segment.airline} · {segment.flight}</strong><span>{segment.aircraft}</span><em>{segment.bookWith}</em></div>
-                    <div className="segment-cabin"><strong>{segment.cabin}</strong>{segment.hard && <span><Check size={11} /> {segment.hard}</span>}</div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <aside className="booking-panel">
-              <div className="booking-block">
-                <span className="panel-label">Funding plan</span>
-                <div className="funding-list">
-                  {strategy.funding.map((item) => (
-                    <div key={item.source}><span>{item.source}</span><strong>{item.amount}</strong><small>{item.use}</small></div>
-                  ))}
+            ) : phase === 'rewards' ? (
+              <div className="rewards-controls">
+                <div className="left-program-stage">
+                  {rewardsReady
+                    ? <ProgramPicker linked={linked} linking={linking} onToggle={toggleProgram} />
+                    : <div className="rewards-preparing"><span /> Preparing your programs…</div>}
                 </div>
+                {rewardsReady && (
+                  <button className="done-button" onClick={finishRewards} disabled={Boolean(transitioning)}>
+                    Done <ArrowRight size={17} />
+                  </button>
+                )}
               </div>
-              <div className="booking-block valuation-block">
-                <span className="panel-label">Value calculation</span>
-                <div><span>Comparable cash fare</span><strong>${formatNumber(strategy.cash)}</strong></div>
-                <div><span>Taxes and fees</span><strong>− ${formatNumber(strategy.fees)}</strong></div>
-                <div><span>Points used</span><strong>÷ {formatNumber(strategy.points)}</strong></div>
-                <div className="valuation-total"><span>Effective value</span><strong>{strategy.cpp.toFixed(2)}¢ / point</strong></div>
+            ) : phase === 'adjust' ? (
+              <div className={`adjustment-controls ${adjustmentCopyComplete ? 'is-ready' : ''}`}>
+                {adjustmentCopyComplete && (
+                  <>
+                    <TripComposer
+                      value={draft}
+                      onChange={setDraft}
+                      onSubmit={submitAdjustment}
+                      placeholder="Add three nights in Kyoto, remove Honolulu, or fly home a day later…"
+                      ariaLabel="Itinerary changes"
+                      autoFocus
+                      focusDelay={140}
+                      busy={adjustmentBusy}
+                      busyLabel="Applying that change…"
+                    />
+                    {adjustmentError && <p className="inline-error" role="status" aria-live="polite"><CircleAlert size={13} /> {adjustmentError}</p>}
+                    {!adjustmentBusy && <button className="more-changes-button looks-good-button" onClick={reviewWithoutChanges}>Looks good as is</button>}
+                  </>
+                )}
               </div>
-              <div className="booking-block tradeoff-block">
-                <span className="panel-label">Main tradeoff</span>
-                <p>{strategy.tradeoff}</p>
+            ) : (
+              <div className="review-action-slot">
+                {reviewCopyComplete && (
+                  <div className="review-controls">
+                    <button
+                      className="generate-button"
+                      onClick={beginOptimization}
+                      disabled={reviewBlocked || Boolean(transitioning)}
+                      aria-describedby="itinerary-readiness-description"
+                    >
+                      Generate personalized flight paths <ArrowRight size={17} />
+                    </button>
+                    <button className="more-changes-button" onClick={makeMoreChanges}>Make more changes</button>
+                  </div>
+                )}
               </div>
-            </aside>
-          </div>
+            )}
 
-          <div className="strategy-footer">
-            <div><ShieldCheck size={15} /><span><strong>Transfer safeguard</strong> Vetra will confirm bookable inventory before any irreversible transfer.</span></div>
-            <button className="secondary-button" onClick={onShowAssumptions}>View assumptions <ChevronRight size={15} /></button>
-          </div>
+          </section>
+
+          <aside
+            className="journey-summary"
+            style={{
+              '--summary-height': `${173 + (['adjust', 'review'].includes(phase)
+                ? reviewLegCapacity
+                : Math.max(requestedLegs.length, 3)) * 100}px`,
+            }}
+          >
+            <div className="summary-heading">
+              <div>
+                <span className="step-label">Itinerary</span>
+                <h2>{phase === 'building'
+                  ? 'Preliminary itinerary'
+                  : adjustmentBusy
+                    ? 'Review your itinerary'
+                    : phase === 'adjust'
+                      ? 'Review your itinerary'
+                      : phase === 'review' && reviewBlocked
+                        ? 'Check your itinerary'
+                        : phase === 'review'
+                          ? 'Ready to search'
+                  : transitioning === 'resolved'
+                    ? 'Itinerary updated'
+                    : phase === 'followup'
+                      ? 'Taking shape'
+                      : 'Ready to optimize'}</h2>
+              </div>
+              {phase !== 'followup' && <span role="status" aria-live="polite" className={`summary-status ${phase === 'building' || adjustmentBusy ? 'building' : ''} ${phase === 'rewards' || phase === 'adjust' || (phase === 'review' && !reviewBlocked) || transitioning === 'resolved' ? 'complete' : ''} ${phase === 'review' && reviewBlocked ? 'warning' : ''}`}>
+                {(phase === 'rewards' || phase === 'adjust' || (phase === 'review' && !reviewBlocked) || transitioning === 'resolved') && <Check size={12} />}
+                {phase === 'building'
+                  ? interpretationError ? 'Stopped' : 'Building'
+                  : adjustmentBusy
+                    ? 'Updating'
+                    : phase === 'review' && reviewBlocked
+                      ? <><CircleAlert size={12} /> {blockedStatusLabel}</>
+                      : 'Complete'}
+              </span>}
+            </div>
+            <FlightLegRows
+              legs={requestedLegs}
+              building={phase === 'building'}
+              visibleCount={preliminaryLegCount}
+              interpreting={!interpretationReady && !interpretationError}
+              justResolved={transitioning === 'resolved'}
+              changedLegIds={changedLegIds}
+              issues={['adjust', 'review'].includes(phase) ? itineraryIssues : []}
+            />
+          </aside>
+        </main>
+      )}
+
+      {phase === 'optimizing' && (
+        <OptimizationView step={optimizationStep} linkedPrograms={linkedPrograms} finishing={optimizationFinishing} />
+      )}
+
+      {phase === 'results' && (
+        <ResultsView
+          linkedPrograms={linkedPrograms}
+          totalBalance={totalBalance}
+          expanded={expandedResult}
+          onExpand={setExpandedResult}
+          onReset={reset}
+        />
+      )}
+
+      <div className="prototype-note"><ShieldCheck size={12} /> Demo data · no bookings or transfers are made</div>
+    </div>
+  )
+}
+
+function TripComposer({ value, onChange, onSubmit, placeholder, hint, ariaLabel = 'Trip details', large = false, autoFocus = false, focusDelay = 620, busy = false, busyLabel = '' }) {
+  const textareaRef = useRef(null)
+  useEffect(() => {
+    if (!autoFocus) return undefined
+    const timer = window.setTimeout(() => textareaRef.current?.focus(), focusDelay)
+    return () => window.clearTimeout(timer)
+  }, [autoFocus, focusDelay])
+  return (
+    <div className={`composer ${large ? 'composer--large' : ''} ${busy ? 'composer--busy' : ''}`} aria-busy={busy}>
+      <textarea
+        ref={textareaRef}
+        aria-label={ariaLabel}
+        value={value}
+        rows={large ? 4 : 2}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        readOnly={busy}
+        onKeyDown={(event) => {
+          const shouldSubmit = event.key === 'Enter' && !event.shiftKey
+          if (shouldSubmit) {
+            event.preventDefault()
+            onSubmit()
+          }
+        }}
+      />
+      <div className={`composer-footer ${!busy && !hint ? 'composer-footer--actions-only' : ''}`}>
+        {(busy || hint) && <span>{busy ? busyLabel : hint}</span>}
+        <button onClick={onSubmit} disabled={!value.trim() || busy} aria-label={busy ? busyLabel : 'Continue'}>
+          {busy ? <i className="composer-busy-dot" /> : <ArrowUp size={18} />}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function FlightLegRows({ legs, result = false, building = false, visibleCount = legs.length, interpreting = false, justResolved = false, changedLegIds = [], issues = [] }) {
+  const visibleLegs = building ? legs.slice(0, visibleCount) : legs
+  const legCount = Math.max(legs.length, interpreting ? 3 : 1)
+  const loaderVisible = building && (interpreting || visibleCount < legs.length)
+  return (
+    <div
+      className={`flight-leg-list ${result ? 'flight-leg-list--result' : 'flight-leg-list--fixed'} ${building ? 'flight-leg-list--building' : ''}`}
+      style={!result ? {
+        '--leg-count': legCount,
+        '--visible-count': Math.min(visibleCount, legCount),
+      } : undefined}
+      aria-busy={building && loaderVisible}
+    >
+      {!result && (
+        <div className="flight-leg-columns" aria-hidden="true">
+          <span />
+          <span>Flight Leg</span>
+          <span>Timing</span>
+          <span>Cabin</span>
         </div>
       )}
-    </article>
-  )
-}
-
-function AssumptionsModal({ strategy, onClose }) {
-  useEffect(() => {
-    const closeOnEscape = (event) => event.key === 'Escape' && onClose()
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [onClose])
-
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Assumptions for ${strategy.title}`}>
-      <div className="assumptions-modal">
-        <button autoFocus className="modal-close" onClick={onClose} aria-label="Close assumptions"><X size={18} /></button>
-        <span className="section-kicker">Modeled ranking methodology</span>
-        <h2>{strategy.title}</h2>
-        <p>This prototype ranks illustrative options; it has not queried airline inventory.</p>
-        <div className="assumption-list">
-          <div><strong>Vetra score · {strategy.score}/100</strong><span>35% hard-constraint fit, 25% point value, 20% cabin quality, 10% booking simplicity, and 10% transfer/connection risk.</span></div>
-          <div><strong>Value · {strategy.cpp.toFixed(2)}¢ per point</strong><span>(${formatNumber(strategy.cash)} modeled comparable mixed-cabin cash fare − ${formatNumber(strategy.fees)} taxes/fees) ÷ {formatNumber(strategy.points)} points.</span></div>
-          <div><strong>Cash comparator</strong><span>A same-date, directionally comparable multi-city fare using business class for New York–Tokyo and the displayed cabins elsewhere. It is illustrative and excludes ground transfers.</span></div>
-          <div><strong>Transfer assumptions</strong><span>1:1 Amex→Aeroplan, Amex→Virgin Atlantic, and Chase→United; no transfer bonuses; transfers assumed available but never initiated.</span></div>
-          <div><strong>Confidence</strong><span>Reflects modeled booking complexity and transfer risk—not a probability that award seats are currently available.</span></div>
+      {visibleLegs.map((leg, index) => (
+        (() => {
+          const legIssues = issues.filter((issue) => issue.legIds.includes(leg.legId))
+          const hasIssue = legIssues.length > 0
+          const hasChanged = changedLegIds.includes(leg.legId)
+          return (
+          <div
+            className={`flight-leg-row ${building ? 'flight-leg-row--building-ready' : ''} ${leg.pending ? 'pending' : ''} ${justResolved && leg.resolved ? 'flight-leg-row--just-resolved' : ''} ${hasChanged ? 'flight-leg-row--changed' : ''} ${hasIssue ? 'flight-leg-row--warning' : ''}`}
+            key={leg.legId || `${leg.route}-${index}`}
+            style={{ '--tile-delay': building ? '0ms' : `${index * (result ? 48 : 70)}ms`, ...(!result ? { gridRow: index + 1 } : {}) }}
+            aria-label={hasIssue ? `${leg.route}. ${legIssues[0].message}` : undefined}
+          >
+            <span className="leg-number">
+              {hasIssue ? <CircleAlert className="leg-warning-icon" size={14} aria-hidden="true" /> : String(index + 1).padStart(2, '0')}
+            </span>
+            <div className="leg-route">
+              {result && <span>{leg.detail}</span>}
+              <strong>{normalizeItineraryText(leg.route)}</strong>
+            </div>
+            <div className="leg-timing">
+              {result && <span>Timing</span>}
+              <strong>{normalizeItineraryText(leg.timing)}</strong>
+            </div>
+            <div className="leg-cabin">
+              {result && <span>Cabin</span>}
+              <strong>{normalizeItineraryText(leg.cabin)}</strong>
+            </div>
+            {result && (
+              <span className={`leg-status ${leg.pending ? 'needed' : ''} ${leg.status ? `is-${leg.status}` : ''}`}>
+                {leg.constraint ? <ShieldCheck size={12} /> : <Check size={12} />}
+                {leg.constraint || 'Included'}
+              </span>
+            )}
+          </div>
+          )
+        })()
+      ))}
+      {loaderVisible && (
+        <div
+          className="building-leg-loader"
+          style={{ gridRow: Math.min(visibleCount, legCount) + 1 }}
+          aria-hidden="true"
+        >
+          <i />
+          <span>{interpreting ? 'Preparing flight legs…' : visibleCount === 0 ? 'Identifying first leg…' : 'Identifying next leg…'}</span>
         </div>
-        <button className="primary-button primary-button--full" onClick={onClose}>Understood</button>
-      </div>
+      )}
+      {building && (
+        <span className="sr-only" role="status" aria-live="polite">
+          {visibleCount > 0 ? `Flight leg ${visibleCount} of ${legs.length} added.` : 'Identifying flight legs.'}
+        </span>
+      )}
     </div>
   )
 }
 
-function ConnectionModal({ program, step, onConnect, onClose }) {
+function ProgramPicker({ linked, linking, onToggle }) {
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchTileRef = useRef(null)
+  const featuredPrograms = programs.filter((program) => program.featured)
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    window.setTimeout(() => searchTileRef.current?.focus(), 0)
+  }, [])
+
+  return (
+    <>
+      <div className="program-picker">
+        <div className="program-grid">
+          {featuredPrograms.map((program, index) => (
+            <ProgramTile
+              key={program.id}
+              program={program}
+              index={index}
+              linked={linked}
+              linking={linking}
+              onToggle={onToggle}
+            />
+          ))}
+          <button
+            ref={searchTileRef}
+            className="program-tile program-tile--search"
+            onClick={() => setSearchOpen(true)}
+            style={{ '--tile-delay': `${featuredPrograms.length * 45}ms` }}
+            aria-label="Search for another rewards program"
+          >
+            <span className="program-logo program-logo--search">•••</span>
+            <span className="program-copy"><strong>Missing program?</strong><small>Search</small></span>
+            <span className="program-action"><Search size={13} /></span>
+          </button>
+        </div>
+        <span className="sr-only" role="status" aria-live="polite">
+          {linking.length ? `Connecting ${linking.length} program${linking.length === 1 ? '' : 's'}.` : linked.length ? `${linked.length} award program${linked.length === 1 ? '' : 's'} linked.` : ''}
+        </span>
+      </div>
+      {searchOpen && createPortal(
+        <ProgramSearchModal
+          linked={linked}
+          linking={linking}
+          onToggle={onToggle}
+          onClose={closeSearch}
+        />,
+        document.body,
+      )}
+    </>
+  )
+}
+
+function ProgramTile({ program, index, linked, linking, onToggle }) {
+  const isLinked = linked.includes(program.id)
+  const isLinking = linking.includes(program.id)
+  return (
+    <button
+      className={`program-tile ${isLinked ? 'linked' : ''} ${isLinking ? 'linking' : ''}`}
+      onClick={() => onToggle(program.id)}
+      style={{ '--tile-delay': `${index * 45}ms` }}
+      aria-pressed={isLinked}
+      aria-busy={isLinking}
+      aria-label={`${isLinking ? 'Connecting' : isLinked ? 'Disconnect' : 'Connect'} ${program.name}${isLinked ? `, ${formatNumber(program.balance)} points linked` : ''}`}
+      disabled={isLinking}
+    >
+      <span className="program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
+      <span className="program-copy"><strong>{program.name}</strong><small>{isLinking ? 'Connecting demo balance…' : isLinked ? `${formatNumber(program.balance)} points` : program.program}</small></span>
+      <span className="program-action">{isLinking ? <i /> : isLinked ? <Check size={14} /> : '+'}</span>
+    </button>
+  )
+}
+
+function ProgramSearchModal({ linked, linking, onToggle, onClose }) {
+  const [query, setQuery] = useState('')
+  const inputRef = useRef(null)
+  const searchablePrograms = useMemo(() => programs.filter((program) => !program.featured), [])
+  const filteredPrograms = searchablePrograms.filter((program) => {
+    const haystack = `${program.name} ${program.program}`.toLowerCase()
+    return haystack.includes(query.trim().toLowerCase())
+  })
+
   useEffect(() => {
-    const closeOnEscape = (event) => event.key === 'Escape' && onClose()
+    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 80)
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
     window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
+    return () => {
+      window.clearTimeout(focusTimer)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
   }, [onClose])
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Connect ${program.name}`}>
-      <div className="connection-modal">
-        <button autoFocus className="modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
-        <div className="oauth-header"><div className="program-logo program-logo--large" style={{ color: program.color, background: program.tint }}>{program.mark}</div><div><strong>{program.name}</strong><span>{program.program}</span></div></div>
-
-        {step === 'login' && (
-          <>
-            <div className="oauth-browser"><Sparkles size={12} /> Simulated program handoff <MoreHorizontal size={14} /></div>
-            <div className="oauth-copy"><h2>Connect sample balance</h2><p>This demo mimics a read-only authorization without contacting {program.name} or collecting credentials.</p></div>
-            <div className="demo-credential-note"><ShieldCheck size={16} /><span><strong>No sign-in data is sent</strong> Continue to load the prototype balance shown for this program.</span></div>
-            <button className="oauth-button" style={{ background: program.color }} onClick={onConnect}>Authorize demo connection</button>
-            <div className="oauth-permissions"><strong>The production connection would:</strong><span><Check size={13} /> Read your points balance</span><span><Check size={13} /> Read membership and status details</span><span className="not-allowed"><X size={13} /> Never transfer or redeem points</span></div>
-          </>
-        )}
-
-        {step === 'syncing' && (
-          <div className="modal-state"><div className="sync-orb"><RefreshCw size={24} /></div><h2>Loading sample balance</h2><p>Simulating a read-only connection to {program.program}…</p></div>
-        )}
-
-        {step === 'done' && (
-          <div className="modal-state"><div className="success-orb"><Check size={25} /></div><h2>Demo program connected</h2><div className="modal-balance"><span>Sample balance</span><strong>{formatNumber(program.balance)}</strong><small>points · stored locally</small></div><button className="primary-button primary-button--full" onClick={onClose}>Done</button><p className="persistent-note"><Link2 size={13} /> This sample connection remains linked in this browser.</p></div>
-        )}
-        <div className="powered-by"><ShieldCheck size={13} /> Vetra prototype · no external connection</div>
-      </div>
+    <div className="program-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="program-modal" role="dialog" aria-modal="true" aria-labelledby="program-search-title">
+        <header className="program-modal-heading">
+          <div>
+            <h2 id="program-search-title">Find your program</h2>
+            <p>Search additional airline and card rewards programs.</p>
+          </div>
+          <button onClick={onClose} aria-label="Close program search"><X size={17} /></button>
+        </header>
+        <label className="program-search-field">
+          <Search size={16} />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search programs"
+            aria-label="Search rewards programs"
+          />
+        </label>
+        <div className="program-search-list">
+          {filteredPrograms.map((program) => {
+            const isLinked = linked.includes(program.id)
+            const isLinking = linking.includes(program.id)
+            return (
+              <button
+                key={program.id}
+                className={`program-search-result ${isLinked ? 'linked' : ''}`}
+                onClick={() => onToggle(program.id)}
+                disabled={isLinking}
+                aria-pressed={isLinked}
+                aria-busy={isLinking}
+              >
+                <span className="program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
+                <span className="program-copy"><strong>{program.name}</strong><small>{isLinking ? 'Connecting demo balance…' : isLinked ? `${formatNumber(program.balance)} points linked` : program.program}</small></span>
+                <span className="program-action">{isLinking ? <i /> : isLinked ? <Check size={14} /> : '+'}</span>
+              </button>
+            )
+          })}
+          {!filteredPrograms.length && <div className="program-search-empty">No matching program in this demo set.</div>}
+        </div>
+      </section>
     </div>
+  )
+}
+
+function OptimizationView({ step, linkedPrograms, finishing }) {
+  return (
+    <main className={`optimization-view ${finishing ? 'optimization-view--finishing' : ''}`}>
+      <div className="optimization-orbit" aria-hidden="true">
+        <span className="orbit orbit--one" /><span className="orbit orbit--two" />
+        <span className="optimization-mark"><Brand /></span>
+      </div>
+      <section className="optimization-copy" aria-live="polite">
+        <span className="step-label">Intelligent optimization</span>
+        <h1>Building your best ways to fly.</h1>
+        <p>{linkedPrograms.length ? `Using ${linkedPrograms.length} linked balance${linkedPrograms.length === 1 ? '' : 's'} alongside cash alternatives.` : 'Comparing cash and publicly available award options without linked balances.'}</p>
+        <div className="optimization-list">
+          {optimizationStages.map((stage, index) => (
+            <div className={index < step ? 'complete' : index === step ? 'active' : ''} key={stage.label}>
+              <span className="stage-dot">{index < step ? <Check size={12} /> : index === step ? <i /> : null}</span>
+              <div><strong>{stage.label}</strong><small>{index <= step ? stage.meta : ''}</small></div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </main>
+  )
+}
+
+function ResultsView({ linkedPrograms, totalBalance, expanded, onExpand, onReset }) {
+  return (
+    <main className="results-view">
+      <section className="results-heading">
+        <span className="step-label"><Sparkles size={13} /> Optimization complete</span>
+        <h1>Three strong ways to make this trip work.</h1>
+        <p>{linkedPrograms.length ? `${formatNumber(totalBalance)} linked points were considered. ` : 'No balances were linked, so point funding is illustrative. '}The first option offers the best balance of comfort, value, and booking simplicity.</p>
+      </section>
+      <section className="result-list">
+        {recommendations.map((result, index) => (
+          <article className={`result-card ${expanded === index ? 'expanded' : ''}`} key={result.title} style={{ '--result-color': result.color, '--tile-delay': `${index * 90}ms` }}>
+            <button className="result-summary" onClick={() => onExpand(expanded === index ? -1 : index)} aria-expanded={expanded === index}>
+              <span className="result-rank">0{index + 1}</span>
+              <span className="result-title"><small>{result.label}</small><strong>{result.title}</strong><em>{result.detail}</em></span>
+              <span className="result-metric"><small>Trip total</small><strong>{result.points}</strong><em>{result.fees}</em></span>
+              <span className="result-metric"><small>Point value</small><strong>{result.value}</strong><em>modeled value</em></span>
+              <span className="result-score"><strong>{result.score}</strong><small>Vetra score</small></span>
+              <span className="result-chevron">⌄</span>
+            </button>
+            <div className="result-detail-shell" aria-hidden={expanded !== index}>
+              <div className="result-detail-clip" inert={expanded !== index}>
+                <div className="result-detail">
+                  <section className="result-flight-plan">
+                    <div className="detail-heading"><span>Flight Plan</span><strong>{result.segments.length} Bookable Segments</strong></div>
+                    <FlightLegRows legs={result.segments} result />
+                  </section>
+                  <aside className="result-rationale">
+                    <div className="detail-heading"><span>Decision Brief</span><strong>Why This Ranks #{index + 1}</strong></div>
+                    <ol>
+                      {result.rationale.map((reason, reasonIndex) => (
+                        <li key={reason.label}>
+                          <span>{String(reasonIndex + 1).padStart(2, '0')}</span>
+                          <div><small>{reason.label}</small><strong>{reason.value}</strong></div>
+                        </li>
+                      ))}
+                    </ol>
+                    <button>View Booking Plan <ArrowRight size={14} /></button>
+                  </aside>
+                </div>
+              </div>
+            </div>
+          </article>
+        ))}
+      </section>
+      <button className="new-trip-button" onClick={onReset}>Plan another trip</button>
+    </main>
   )
 }
 

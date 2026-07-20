@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "NODE_ENV=development node server.mjs",
     "build": "vite build",
+    "test:itinerary": "node scripts/itinerary-intent-smoke.mjs",
     "test:safety": "node scripts/safety-smoke.mjs",
     "test:hosted-safety": "node scripts/hosted-safety-smoke.mjs",
     "start": "NODE_ENV=production node server.mjs"

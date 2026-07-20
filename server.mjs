@@ -5,7 +5,17 @@ import express from 'express'
 import { config } from 'dotenv'
 import OpenAI from 'openai'
 import { zodTextFormat } from 'openai/helpers/zod'
-import { z } from 'zod'
+import {
+  ParsedItineraryAdjustment,
+  ParsedTripIntent,
+  normalizeParsedItineraryAdjustment,
+  normalizeParsedTripIntent,
+  ITINERARY_ADJUSTMENT_MAX_OUTPUT_TOKENS,
+  ITINERARY_ADJUSTMENT_PROMPT,
+  TRIP_INTERPRETATION_MAX_OUTPUT_TOKENS,
+  TRIP_INTERPRETATION_MODEL,
+  TRIP_INTERPRETATION_PROMPT,
+} from './shared/trip-intelligence.mjs'
 
 config({ path: '.env.local' })
 config()
@@ -14,7 +24,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const port = Number(process.env.PORT || 5173)
 // Pin the exact snapshot included in OpenAI's complimentary-token program.
 // Do not replace this with a floating alias: eligibility is snapshot-specific.
-const model = 'gpt-5.4-2026-03-05'
+const model = TRIP_INTERPRETATION_MODEL
 const complimentaryTokensConfirmed =
   process.env.OPENAI_COMPLIMENTARY_TOKENS_CONFIRMED === 'true'
 const configuredDailyTokenLimit = Number(
@@ -30,7 +40,7 @@ const configuredBaselineUsage = Number(
 const baselineUsage = Number.isFinite(configuredBaselineUsage)
   ? Math.max(0, Math.floor(configuredBaselineUsage))
   : 0
-const maxOutputTokens = 700
+const maxOutputTokens = TRIP_INTERPRETATION_MAX_OUTPUT_TOKENS
 const usageLedgerPath = path.join(__dirname, '.vetra', 'openai-usage.json')
 let reservedTokens = 0
 const projectId = process.env.OPENAI_PROJECT_ID?.trim()
@@ -38,41 +48,7 @@ const openai = process.env.OPENAI_API_KEY && projectId
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY, project: projectId })
   : null
 
-const Constraint = z.object({
-  icon: z.enum(['route', 'date', 'cabin', 'flex', 'traveler']),
-  label: z.string(),
-  value: z.string(),
-  hard: z.boolean(),
-})
-
-const ParsedTripBrief = z.object({
-  assistantMessage: z.string(),
-  routeCities: z.array(z.string()),
-  constraints: z.array(Constraint),
-})
-
-const SYSTEM_PROMPT = `
-You are Vetra, an expert flight-award optimization agent for experienced US points travelers.
-
-Your job in this step is only to interpret a user's explicit flight request into a concise,
-auditable brief for confirmation. Do not plan activities, choose destinations, search fares,
-invent preferences, or claim that availability has been checked.
-
-Success means:
-- assistantMessage acknowledges the request in one or two calm, precise sentences
-- routeCities contains the requested cities in travel order, including the return city
-- constraints contains only facts stated or directly implied by the request
-- mark hard=true only for an explicit must/need, required cabin, deadline, or arrival cutoff
-- an exact date by itself is a fixed itinerary input, not a hard constraint, unless the user says it
-  is required or must be met
-- normalize dates and cabin names while preserving the user's intent
-- use the icon whose meaning best matches each constraint
-- combine closely related facts when that improves scanability
-- if the request is not about flights, return an empty routeCities and constraints array and use
-  assistantMessage to ask for a flight brief
-
-Tone: personable, concise, rational, and confident. Never mention internal reasoning.
-`.trim()
+const SYSTEM_PROMPT = TRIP_INTERPRETATION_PROMPT
 
 const app = express()
 app.disable('x-powered-by')
@@ -187,7 +163,7 @@ app.post('/api/parse-trip', async (request, response) => {
         { role: 'user', content: brief },
       ],
       text: {
-        format: zodTextFormat(ParsedTripBrief, 'parsed_trip_brief'),
+        format: zodTextFormat(ParsedTripIntent, 'parsed_trip_intent'),
         verbosity: 'low',
       },
     })
@@ -213,7 +189,7 @@ app.post('/api/parse-trip', async (request, response) => {
     await writeUsageLedger(ledger.tokens + actualTokens)
 
     return response.json({
-      ...parsed,
+      ...normalizeParsedTripIntent(parsed),
       meta: {
         poweredBy: 'OpenAI',
         requestedModel: model,
@@ -237,6 +213,66 @@ app.post('/api/parse-trip', async (request, response) => {
       error: 'Vetra could not interpret that brief with GPT. Please try again.',
       code: 'GPT_REQUEST_FAILED',
     })
+  } finally {
+    reservedTokens = Math.max(0, reservedTokens - reservedForRequest)
+  }
+})
+
+app.post('/api/adjust-trip', async (request, response) => {
+  const adjustmentRequest = typeof request.body?.request === 'string' ? request.body.request.trim() : ''
+  const itinerary = request.body?.itinerary
+  const validItinerary = Number.isInteger(itinerary?.revision)
+    && Array.isArray(itinerary?.flightLegs)
+    && itinerary.flightLegs.length > 0
+    && itinerary.flightLegs.every((leg) => leg.legId && leg.origin && leg.destination)
+
+  if (!adjustmentRequest || adjustmentRequest.length > 5000 || !validItinerary) {
+    return response.status(400).json({ error: 'Please provide a valid itinerary and adjustment request.' })
+  }
+  if (!openai) {
+    return response.status(503).json({ error: 'GPT requires a server-side project key and explicit project ID.', code: 'OPENAI_CONFIGURATION_MISSING' })
+  }
+  if (!complimentaryTokensConfirmed) {
+    return response.status(412).json({ error: 'GPT requests are locked until complimentary-token enrollment is confirmed for this project.', code: 'COMPLIMENTARY_TOKENS_NOT_CONFIRMED' })
+  }
+
+  const userInput = JSON.stringify({ request: adjustmentRequest, itinerary })
+  const estimatedInputTokens = Math.ceil((ITINERARY_ADJUSTMENT_PROMPT.length + userInput.length) / 3)
+  const reservedForRequest = estimatedInputTokens + ITINERARY_ADJUSTMENT_MAX_OUTPUT_TOKENS + 200
+  const beforeRequest = await usageStatus()
+  if (reservedForRequest > beforeRequest.remainingSafeTokens) {
+    return response.status(429).json({ error: 'The complimentary-token safety ceiling has been reached.', code: 'COMPLIMENTARY_TOKEN_SAFETY_CEILING', usage: beforeRequest })
+  }
+  reservedTokens += reservedForRequest
+
+  try {
+    const gptResponse = await openai.responses.parse({
+      model,
+      reasoning: { effort: 'none' },
+      max_output_tokens: ITINERARY_ADJUSTMENT_MAX_OUTPUT_TOKENS,
+      store: false,
+      input: [
+        { role: 'system', content: ITINERARY_ADJUSTMENT_PROMPT },
+        { role: 'user', content: userInput },
+      ],
+      text: { format: zodTextFormat(ParsedItineraryAdjustment, 'parsed_itinerary_adjustment'), verbosity: 'low' },
+    })
+    const parsed = gptResponse.output_parsed || gptResponse.output
+      ?.find((item) => item.type === 'message')
+      ?.content?.find((item) => item.type === 'output_text')?.parsed
+    if (!parsed) throw new Error('GPT returned no parsed itinerary adjustment.')
+
+    const reportedTotal = Number(gptResponse.usage?.total_tokens)
+    const actualTokens = Number.isFinite(reportedTotal) && reportedTotal > 0 ? Math.floor(reportedTotal) : reservedForRequest
+    const ledger = await readUsageLedger()
+    await writeUsageLedger(ledger.tokens + actualTokens)
+    return response.json({
+      ...normalizeParsedItineraryAdjustment(parsed),
+      meta: { poweredBy: 'OpenAI', requestedModel: model, resolvedModel: gptResponse.model || model },
+    })
+  } catch (error) {
+    console.error('Itinerary adjustment failed', { status: Number(error?.status) || 502, requestId: error?.request_id, type: error?.type, code: error?.code })
+    return response.status(502).json({ error: 'Vetra could not apply that itinerary change. Please try again.', code: 'GPT_REQUEST_FAILED' })
   } finally {
     reservedTokens = Math.max(0, reservedTokens - reservedForRequest)
   }

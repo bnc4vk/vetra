@@ -1,9 +1,19 @@
 import OpenAI from 'openai'
 import { zodTextFormat } from 'openai/helpers/zod'
-import { z } from 'zod'
+import {
+  ParsedItineraryAdjustment,
+  ParsedTripIntent,
+  normalizeParsedItineraryAdjustment,
+  normalizeParsedTripIntent,
+  ITINERARY_ADJUSTMENT_MAX_OUTPUT_TOKENS,
+  ITINERARY_ADJUSTMENT_PROMPT,
+  TRIP_INTERPRETATION_MAX_OUTPUT_TOKENS,
+  TRIP_INTERPRETATION_MODEL,
+  TRIP_INTERPRETATION_PROMPT,
+} from '../shared/trip-intelligence.mjs'
 
-const model = 'gpt-5.4-2026-03-05'
-const maxOutputTokens = 700
+const model = TRIP_INTERPRETATION_MODEL
+const maxOutputTokens = TRIP_INTERPRETATION_MAX_OUTPUT_TOKENS
 const dailyTokenLimit = Number(process.env.OPENAI_COMPLIMENTARY_DAILY_TOKEN_LIMIT || 250_000)
 // The public demo is deliberately stricter than the local 90% ceiling. Keeping the
 // hosted service at 40% leaves 150k tokens of headroom for other eligible org usage.
@@ -36,41 +46,7 @@ const openai = process.env.OPENAI_API_KEY && projectId
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY, project: projectId })
   : null
 
-const Constraint = z.object({
-  icon: z.enum(['route', 'date', 'cabin', 'flex', 'traveler']),
-  label: z.string(),
-  value: z.string(),
-  hard: z.boolean(),
-})
-
-const ParsedTripBrief = z.object({
-  assistantMessage: z.string(),
-  routeCities: z.array(z.string()),
-  constraints: z.array(Constraint),
-})
-
-const SYSTEM_PROMPT = `
-You are Vetra, an expert flight-award optimization agent for experienced US points travelers.
-
-Your job in this step is only to interpret a user's explicit flight request into a concise,
-auditable brief for confirmation. Do not plan activities, choose destinations, search fares,
-invent preferences, or claim that availability has been checked.
-
-Success means:
-- assistantMessage acknowledges the request in one or two calm, precise sentences
-- routeCities contains the requested cities in travel order, including the return city
-- constraints contains only facts stated or directly implied by the request
-- mark hard=true only for an explicit must/need, required cabin, deadline, or arrival cutoff
-- an exact date by itself is a fixed itinerary input, not a hard constraint, unless the user says it
-  is required or must be met
-- normalize dates and cabin names while preserving the user's intent
-- use the icon whose meaning best matches each constraint
-- combine closely related facts when that improves scanability
-- if the request is not about flights, return an empty routeCities and constraints array and use
-  assistantMessage to ask for a flight brief
-
-Tone: personable, concise, rational, and confident. Never mention internal reasoning.
-`.trim()
+const SYSTEM_PROMPT = TRIP_INTERPRETATION_PROMPT
 
 const utcDate = () => new Date().toISOString().slice(0, 10)
 const expiryEpoch = () => {
@@ -209,13 +185,21 @@ export default async function handler(request, response) {
     return response.json(await usageStatus())
   }
 
-  if (request.method !== 'POST' || route !== 'parse-trip') {
+  if (request.method !== 'POST' || !['parse-trip', 'adjust-trip'].includes(route)) {
     return response.status(404).json({ error: 'Not found.' })
   }
 
+  const isAdjustment = route === 'adjust-trip'
   const brief = typeof request.body?.brief === 'string' ? request.body.brief.trim() : ''
-  if (!brief || brief.length > 5000) {
-    return response.status(400).json({ error: 'Please provide a flight brief between 1 and 5,000 characters.' })
+  const adjustmentRequest = typeof request.body?.request === 'string' ? request.body.request.trim() : ''
+  const itinerary = request.body?.itinerary
+  const validItinerary = Number.isInteger(itinerary?.revision)
+    && Array.isArray(itinerary?.flightLegs)
+    && itinerary.flightLegs.length > 0
+    && itinerary.flightLegs.every((leg) => leg.legId && leg.origin && leg.destination)
+  if ((!isAdjustment && (!brief || brief.length > 5000))
+    || (isAdjustment && (!adjustmentRequest || adjustmentRequest.length > 5000 || !validItinerary))) {
+    return response.status(400).json({ error: isAdjustment ? 'Please provide a valid itinerary and adjustment request.' : 'Please provide a flight brief between 1 and 5,000 characters.' })
   }
   if (!openai || !projectId) {
     return response.status(503).json({ error: 'GPT is not configured.', code: 'OPENAI_CONFIGURATION_MISSING' })
@@ -233,8 +217,13 @@ export default async function handler(request, response) {
     return response.status(429).json({ error: 'The daily demo request limit has been reached.', code: 'IP_RATE_LIMIT' })
   }
 
-  const estimatedInputTokens = Math.ceil((SYSTEM_PROMPT.length + brief.length) / 3)
-  const reservedForRequest = estimatedInputTokens + maxOutputTokens + 200
+  const systemPrompt = isAdjustment ? ITINERARY_ADJUSTMENT_PROMPT : SYSTEM_PROMPT
+  const userInput = isAdjustment ? JSON.stringify({ request: adjustmentRequest, itinerary }) : brief
+  const outputTokens = isAdjustment ? ITINERARY_ADJUSTMENT_MAX_OUTPUT_TOKENS : maxOutputTokens
+  const outputSchema = isAdjustment ? ParsedItineraryAdjustment : ParsedTripIntent
+  const outputName = isAdjustment ? 'parsed_itinerary_adjustment' : 'parsed_trip_intent'
+  const estimatedInputTokens = Math.ceil((systemPrompt.length + userInput.length) / 3)
+  const reservedForRequest = estimatedInputTokens + outputTokens + 200
   const reservation = await reserveTokens(reservedForRequest)
   if (!reservation.accepted) {
     return response.status(429).json({
@@ -247,13 +236,13 @@ export default async function handler(request, response) {
     const gptResponse = await openai.responses.parse({
       model,
       reasoning: { effort: 'none' },
-      max_output_tokens: maxOutputTokens,
+      max_output_tokens: outputTokens,
       store: false,
       input: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: brief },
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userInput },
       ],
-      text: { format: zodTextFormat(ParsedTripBrief, 'parsed_trip_brief'), verbosity: 'low' },
+      text: { format: zodTextFormat(outputSchema, outputName), verbosity: 'low' },
     })
 
     const parsed = gptResponse.output_parsed || gptResponse.output
@@ -268,7 +257,7 @@ export default async function handler(request, response) {
     await reconcileReservation(reservedForRequest, actualTokens)
 
     return response.json({
-      ...parsed,
+      ...(isAdjustment ? normalizeParsedItineraryAdjustment(parsed) : normalizeParsedTripIntent(parsed)),
       meta: {
         poweredBy: 'OpenAI',
         requestedModel: model,
