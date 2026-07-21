@@ -34,6 +34,7 @@ assert.deepEqual(response.body.contractVersions, {
   tripIntent: 'itinerary-intent/v1',
   itineraryAdjustment: 'itinerary-adjustment/v1',
 })
+assert.equal(response.body.deploymentRevision, null)
 assert.equal(response.body.readyForGpt, false)
 assert.equal(response.body.quotaStoreConfigured, false)
 

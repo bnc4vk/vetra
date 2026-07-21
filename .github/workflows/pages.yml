@@ -1,6 +1,8 @@
-name: Deploy GitHub Pages
+name: Validate and deploy Vetra
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
@@ -11,11 +13,82 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: vetra-production
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build production frontend
+        env:
+          VITE_BASE_PATH: /vetra/
+          VITE_API_BASE_URL: ${{ vars.VETRA_API_BASE_URL }}
+        run: npm run build
+      - name: Test itinerary contract
+        run: npm run test:itinerary
+      - name: Test result continuity
+        run: npm run test:results
+      - name: Test local billing safety
+        run: npm run test:safety
+      - name: Test hosted safety
+        run: npm run test:hosted-safety
+
+  deploy-api:
+    name: Deploy API
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    outputs:
+      deployment-url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install pinned Vercel CLI
+        run: npm install --global vercel@56.4.1
+      - name: Link production project
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+      - name: Deploy production API
+        id: deploy
+        run: |
+          deployment_url="$(vercel deploy --prod --yes --token="$VERCEL_TOKEN" --env VETRA_DEPLOYMENT_SHA="$GITHUB_SHA" --meta githubCommitSha="$GITHUB_SHA")"
+          echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
+      - name: Verify immutable API deployment
+        env:
+          EXPECTED_DEPLOYMENT_SHA: ${{ github.sha }}
+          VETRA_API_BASE_URL: ${{ steps.deploy.outputs.url }}
+        run: npm run test:hosted-contract
+      - name: Verify production API alias
+        env:
+          EXPECTED_DEPLOYMENT_SHA: ${{ github.sha }}
+          VETRA_API_BASE_URL: ${{ vars.VETRA_API_BASE_URL }}
+        run: npm run test:hosted-contract
+
+  deploy-pages:
+    name: Deploy Pages
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [validate, deploy-api]
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -30,10 +103,6 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Verify hosted API contract
-        env:
-          VETRA_API_BASE_URL: ${{ vars.VETRA_API_BASE_URL }}
-        run: npm run test:hosted-contract
       - name: Build Vetra
         env:
           VITE_BASE_PATH: /vetra/
@@ -48,3 +117,5 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Verify public site
+        run: curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 3 "${{ steps.deployment.outputs.page_url }}" > /dev/null

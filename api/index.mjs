@@ -16,6 +16,9 @@ import {
 
 const model = TRIP_INTERPRETATION_MODEL
 const maxOutputTokens = TRIP_INTERPRETATION_MAX_OUTPUT_TOKENS
+const deploymentRevision = process.env.VETRA_DEPLOYMENT_SHA?.trim()
+  || process.env.VERCEL_GIT_COMMIT_SHA?.trim()
+  || null
 const dailyTokenLimit = Number(process.env.OPENAI_COMPLIMENTARY_DAILY_TOKEN_LIMIT || 250_000)
 // The public demo is deliberately stricter than the local 90% ceiling. Keeping the
 // hosted service at 40% leaves 150k tokens of headroom for other eligible org usage.
@@ -179,6 +182,7 @@ export default async function handler(request, response) {
         tripIntent: TRIP_INTENT_VERSION,
         itineraryAdjustment: ITINERARY_ADJUSTMENT_VERSION,
       },
+      deploymentRevision,
       billingSafety: 'fail-closed-atomic-hosted-quota',
       usage,
     })
