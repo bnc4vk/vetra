@@ -50,12 +50,12 @@ assert.deepEqual(normalized.routeCities, ['New York', 'Tokyo', 'South Korea', 'V
 assert.deepEqual(normalized.flightLegs.map((entry) => entry.sequence), [1, 2, 3, 4])
 
 const uiBrief = toUiTripBrief({ ...normalized, meta: { resolvedModel: TRIP_INTERPRETATION_MODEL } }, 'Demo brief')
-const southKoreaResolved = applyFollowUpToBrief(uiBrief, uiBrief.followUpQuestions[0], 'Seoul')
+const southKoreaResolved = applyFollowUpToBrief(uiBrief, uiBrief.followUpQuestions[0], 'seoul')
 assert.deepEqual(southKoreaResolved.cities, ['New York', 'Tokyo', 'Seoul', 'Vietnam', 'New York'])
 assert.equal(southKoreaResolved.followUpQuestions.length, 1)
 assert.equal(southKoreaResolved.followUpQuestions[0].scope, 'Vietnam')
 
-const fullyResolved = applyFollowUpToBrief(southKoreaResolved, southKoreaResolved.followUpQuestions[0], 'Hanoi')
+const fullyResolved = applyFollowUpToBrief(southKoreaResolved, southKoreaResolved.followUpQuestions[0], 'hanoi')
 assert.deepEqual(fullyResolved.cities, ['New York', 'Tokyo', 'Seoul', 'Hanoi', 'New York'])
 assert.deepEqual(fullyResolved.followUpQuestions, [])
 assert.deepEqual(validateItinerary(fullyResolved.flightLegs), [])

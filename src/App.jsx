@@ -4,7 +4,11 @@ import {
   ArrowRight,
   ArrowUp,
   Check,
+  CheckCircle2,
   CircleAlert,
+  Eye,
+  EyeOff,
+  LockKeyhole,
   RotateCcw,
   Search,
   ShieldCheck,
@@ -20,6 +24,7 @@ import {
   toUiTripBrief,
   validateItinerary,
 } from './tripIntelligence'
+import { buildDemoRecommendations } from './flightRecommendations'
 
 const WELCOME_COPY =
   'Welcome to Vetra, the intelligent flights agent personalized to your travel style and award balances.'
@@ -32,12 +37,17 @@ const DEV_STEP3_MODE = Boolean(
   && typeof window !== 'undefined'
   && new URLSearchParams(window.location.search).get('dev') === 'step3',
 )
+const DEV_RESULTS_MODE = Boolean(
+  import.meta.env.DEV
+  && typeof window !== 'undefined'
+  && new URLSearchParams(window.location.search).get('dev') === 'results',
+)
 const DEV_ADJUST_MODE = Boolean(
   import.meta.env.DEV
   && typeof window !== 'undefined'
   && new URLSearchParams(window.location.search).get('dev') === 'adjust',
 )
-const DEV_ADJUST_BRIEF = DEV_ADJUST_MODE ? {
+const DEV_BRIEF = DEV_ADJUST_MODE || DEV_RESULTS_MODE ? {
   raw: DEV_STEP3_BRIEF,
   revision: 0,
   appliedOperationIds: [],
@@ -71,7 +81,6 @@ const MOTION = {
   followUpSettle: 580,
   rewardsReveal: 720,
   awardsExit: 480,
-  programLink: 800,
   adjustmentMinProcess: 720,
   adjustmentSettle: 380,
   adjustmentCopy: 110,
@@ -112,73 +121,6 @@ const optimizationStages = [
   { label: 'Checking award options across your programs', meta: '9 programs compared' },
   { label: 'Testing transfer combinations and fees', meta: '27 funding paths' },
   { label: 'Ranking the strongest complete itineraries', meta: '3 final strategies' },
-]
-
-const recommendations = [
-  {
-    label: 'Best overall',
-    title: 'Aeroplan-led itinerary',
-    detail: 'Business to Tokyo, then the most efficient economy awards onward',
-    points: '168,000 pts',
-    fees: '$312 fees',
-    value: '3.9¢ / point',
-    score: 94,
-    color: '#6258d6',
-    segments: [
-      { route: 'JFK → YYZ', timing: 'October 7 · 9:10 AM', cabin: 'Business Class', detail: 'Air Canada · AC 701' },
-      { route: 'YYZ → HND', timing: 'October 7 · 1:15 PM', cabin: 'Business Class', detail: 'Air Canada · AC 1', constraint: 'Arrives 55m Early' },
-      { route: 'HND → GMP', timing: 'October 12 · 4:10 PM', cabin: 'Economy', detail: 'ANA · NH 865' },
-      { route: 'ICN → HNL', timing: 'October 16 · 8:20 PM', cabin: 'Economy', detail: 'Asiana · OZ 232' },
-      { route: 'HNL → EWR', timing: 'October 20 · 4:55 PM', cabin: 'Economy Plus', detail: 'United · UA 362' },
-    ],
-    rationale: [
-      { label: 'Constraint Fit', value: 'Business To Tokyo · Arrives 55m Before Cutoff' },
-      { label: 'Funding', value: '41,250 Aeroplan + 126,750 Amex' },
-      { label: 'Trade-Off', value: 'One Toronto Connection · $312 Taxes' },
-    ],
-  },
-  {
-    label: 'Best point value',
-    title: 'Virgin + United itinerary',
-    detail: 'Fewer points, with two transfers and a more involved booking path',
-    points: '145,000 pts',
-    fees: '$684 fees',
-    value: '4.3¢ / point',
-    score: 89,
-    color: '#be477e',
-    segments: [
-      { route: 'JFK → HND', timing: 'October 7 · 2:05 AM', cabin: 'Business Class', detail: 'ANA · NH 159', constraint: 'Early Arrival' },
-      { route: 'NRT → ICN', timing: 'October 12 · 1:20 PM', cabin: 'Economy', detail: 'Asiana · OZ 101' },
-      { route: 'ICN → HNL', timing: 'October 16 · 8:20 PM', cabin: 'Economy', detail: 'Asiana · OZ 232' },
-      { route: 'HNL → EWR', timing: 'October 20 · 4:55 PM', cabin: 'Economy Plus', detail: 'United · UA 362' },
-    ],
-    rationale: [
-      { label: 'Point Value', value: 'Highest Modeled Return · 4.3¢ Per Point' },
-      { label: 'Funding', value: '75,000 Amex + 70,000 Chase' },
-      { label: 'Trade-Off', value: 'Two Transfers · $684 Taxes' },
-    ],
-  },
-  {
-    label: 'Simplest booking',
-    title: 'United-led itinerary',
-    detail: 'One transfer partner and the fewest separate booking steps',
-    points: '180,000 pts',
-    fees: '$248 fees',
-    value: '3.7¢ / point',
-    score: 86,
-    color: '#17806c',
-    segments: [
-      { route: 'EWR → HND', timing: 'October 7 · 10:30 AM', cabin: 'Business Class', detail: 'United · UA 131', constraint: 'Direct' },
-      { route: 'HND → ICN', timing: 'October 12 · 3:45 PM', cabin: 'Economy', detail: 'United Partner Award' },
-      { route: 'ICN → HNL', timing: 'October 16 · 8:20 PM', cabin: 'Economy', detail: 'United Partner Award' },
-      { route: 'HNL → EWR', timing: 'October 20 · 4:55 PM', cabin: 'Economy Plus', detail: 'United · UA 362' },
-    ],
-    rationale: [
-      { label: 'Booking Path', value: 'One Program · Four Award Segments' },
-      { label: 'Funding', value: '180,000 Chase → United' },
-      { label: 'Trade-Off', value: '35,000 More Points · Lowest Fees' },
-    ],
-  },
 ]
 
 const formatNumber = (value) => new Intl.NumberFormat('en-US').format(value)
@@ -242,12 +184,11 @@ function WordReveal({ children, className = '', speed = 55, instant = false, onC
 }
 
 function App() {
-  const [phase, setPhase] = useState(DEV_ADJUST_MODE ? 'adjust' : DEV_STEP3_MODE ? 'intake' : 'welcome')
+  const [phase, setPhase] = useState(DEV_RESULTS_MODE ? 'results' : DEV_ADJUST_MODE ? 'adjust' : DEV_STEP3_MODE ? 'intake' : 'welcome')
   const [draft, setDraft] = useState(DEV_STEP3_MODE ? DEV_STEP3_BRIEF : '')
-  const [brief, setBrief] = useState(DEV_ADJUST_BRIEF)
+  const [brief, setBrief] = useState(DEV_BRIEF)
   const [followUp, setFollowUp] = useState(null)
   const [linked, setLinked] = useState([])
-  const [linking, setLinking] = useState([])
   const [optimizationStep, setOptimizationStep] = useState(0)
   const [optimizationFinishing, setOptimizationFinishing] = useState(false)
   const [expandedResult, setExpandedResult] = useState(0)
@@ -261,15 +202,14 @@ function App() {
   const [changedLegIds, setChangedLegIds] = useState([])
   const [adjustmentCopyComplete, setAdjustmentCopyComplete] = useState(false)
   const [reviewCopyComplete, setReviewCopyComplete] = useState(false)
-  const [reviewLegCapacity, setReviewLegCapacity] = useState(Math.max(DEV_ADJUST_BRIEF?.flightLegs?.length || 0, 3))
-  const [introCopyComplete, setIntroCopyComplete] = useState(DEV_STEP3_MODE || DEV_ADJUST_MODE)
+  const [reviewLegCapacity, setReviewLegCapacity] = useState(Math.max(DEV_BRIEF?.flightLegs?.length || 0, 3))
+  const [introCopyComplete, setIntroCopyComplete] = useState(DEV_STEP3_MODE || DEV_ADJUST_MODE || DEV_RESULTS_MODE)
   const [introExiting, setIntroExiting] = useState(false)
   const introTimers = useRef([])
-  const linkTimers = useRef([])
   const transitionTimers = useRef([])
   const optimizationTimer = useRef(null)
   const resultTimer = useRef(null)
-  const introCompleteRef = useRef(DEV_STEP3_MODE || DEV_ADJUST_MODE)
+  const introCompleteRef = useRef(DEV_STEP3_MODE || DEV_ADJUST_MODE || DEV_RESULTS_MODE)
   const interpretationController = useRef(null)
   const adjustmentController = useRef(null)
 
@@ -288,7 +228,7 @@ function App() {
   }
 
   useEffect(() => {
-    if (DEV_ADJUST_MODE) return undefined
+    if (DEV_ADJUST_MODE || DEV_RESULTS_MODE) return undefined
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
       setPhase('intake')
       return undefined
@@ -335,7 +275,6 @@ function App() {
   useEffect(() => () => {
     interpretationController.current?.abort()
     adjustmentController.current?.abort()
-    linkTimers.current.forEach(window.clearTimeout)
     transitionTimers.current.forEach(window.clearTimeout)
     if (optimizationTimer.current) window.clearTimeout(optimizationTimer.current)
     if (resultTimer.current) window.clearTimeout(resultTimer.current)
@@ -493,18 +432,11 @@ function App() {
   }
 
   const toggleProgram = (programId) => {
-    if (linking.includes(programId)) return
     if (linked.includes(programId)) {
       setLinked((current) => current.filter((id) => id !== programId))
       return
     }
-    setLinking((current) => [...current, programId])
-    const timer = window.setTimeout(() => {
-      setLinked((current) => [...current, programId])
-      setLinking((current) => current.filter((id) => id !== programId))
-      linkTimers.current = linkTimers.current.filter((timerId) => timerId !== timer)
-    }, MOTION.programLink)
-    linkTimers.current.push(timer)
+    setLinked((current) => current.includes(programId) ? current : [...current, programId])
   }
 
   const finishRewards = () => {
@@ -576,6 +508,7 @@ function App() {
 
   const beginOptimization = () => {
     if (transitioning || itineraryIssues.length) return
+    setExpandedResult(0)
     setTransitioning('awards-exit')
     scheduleTransition(() => {
       setPhase('optimizing')
@@ -588,8 +521,6 @@ function App() {
     adjustmentController.current?.abort()
     interpretationController.current = null
     introTimers.current.forEach(window.clearTimeout)
-    linkTimers.current.forEach(window.clearTimeout)
-    linkTimers.current = []
     clearTransitionTimers()
     if (optimizationTimer.current) window.clearTimeout(optimizationTimer.current)
     optimizationTimer.current = null
@@ -599,9 +530,9 @@ function App() {
     setBrief(null)
     setFollowUp(null)
     setLinked([])
-    setLinking([])
     setOptimizationStep(0)
     setOptimizationFinishing(false)
+    setExpandedResult(0)
     setTransitioning(null)
     setRewardsReady(false)
     setPreliminaryLegCount(0)
@@ -639,7 +570,7 @@ function App() {
     <div className={`app app--${phase} ${transitioning ? `app--transition-${transitioning}` : ''}`}>
       <header className="app-header">
         <Brand />
-        {!isIntro && (
+        {!isIntro && phase !== 'results' && (
           <button className="reset-button" onClick={reset}><RotateCcw size={14} /> Start over</button>
         )}
       </header>
@@ -763,7 +694,7 @@ function App() {
               <div className="rewards-controls">
                 <div className="left-program-stage">
                   {rewardsReady
-                    ? <ProgramPicker linked={linked} linking={linking} onToggle={toggleProgram} />
+                    ? <ProgramPicker linked={linked} onToggle={toggleProgram} />
                     : <div className="rewards-preparing"><span /> Preparing your programs…</div>}
                 </div>
                 {rewardsReady && (
@@ -864,13 +795,14 @@ function App() {
       )}
 
       {phase === 'optimizing' && (
-        <OptimizationView step={optimizationStep} linkedPrograms={linkedPrograms} finishing={optimizationFinishing} />
+        <OptimizationView step={optimizationStep} linkedPrograms={linkedPrograms} finishing={optimizationFinishing} brief={brief} />
       )}
 
       {phase === 'results' && (
         <ResultsView
           linkedPrograms={linkedPrograms}
           totalBalance={totalBalance}
+          brief={brief}
           expanded={expandedResult}
           onExpand={setExpandedResult}
           onReset={reset}
@@ -930,11 +862,32 @@ function FlightLegRows({ legs, result = false, building = false, visibleCount = 
       } : undefined}
       aria-busy={building && loaderVisible}
     >
+      {result && (
+        <div className="result-leg-columns" role="row">
+          <span role="columnheader" aria-label="Segment number" />
+          <span role="columnheader">Flight</span>
+          <span role="columnheader">Departure</span>
+          <span role="columnheader">Arrival</span>
+          <span role="columnheader">Cabin</span>
+          <span role="columnheader">Award cost</span>
+          <span role="columnheader">Cash value</span>
+          <span
+            className="point-value-heading"
+            role="columnheader"
+            tabIndex="0"
+            aria-label="Point value. Net cents per point equals cash fare minus fees, divided by points."
+            data-tooltip="Net cents per point: (cash fare − fees) / points"
+          >
+            Point value <span aria-hidden="true">ⓘ</span>
+          </span>
+        </div>
+      )}
       {!result && (
         <div className="flight-leg-columns" aria-hidden="true">
           <span />
           <span>Flight Leg</span>
-          <span>Timing</span>
+          <span>Departure</span>
+          <span>Arrival</span>
           <span>Cabin</span>
         </div>
       )}
@@ -943,6 +896,10 @@ function FlightLegRows({ legs, result = false, building = false, visibleCount = 
           const legIssues = issues.filter((issue) => issue.legIds.includes(leg.legId))
           const hasIssue = legIssues.length > 0
           const hasChanged = changedLegIds.includes(leg.legId)
+          const isArrivalDeadline = /arrive_by/i.test(leg.timingKind || '')
+          const isTripWindow = /trip_window/i.test(leg.timingKind || '')
+          const departure = leg.departure || (isArrivalDeadline ? 'Flexible' : isTripWindow ? 'Within Trip Window' : leg.timing)
+          const arrival = leg.arrival || (isTripWindow ? 'Flexible' : leg.timing)
           return (
           <div
             className={`flight-leg-row ${building ? 'flight-leg-row--building-ready' : ''} ${leg.pending ? 'pending' : ''} ${justResolved && leg.resolved ? 'flight-leg-row--just-resolved' : ''} ${hasChanged ? 'flight-leg-row--changed' : ''} ${hasIssue ? 'flight-leg-row--warning' : ''}`}
@@ -958,18 +915,18 @@ function FlightLegRows({ legs, result = false, building = false, visibleCount = 
               <strong>{normalizeItineraryText(leg.route)}</strong>
             </div>
             <div className="leg-timing">
-              {result && <span>Timing</span>}
-              <strong>{normalizeItineraryText(leg.timing)}</strong>
+              <strong>{normalizeItineraryText(departure)}</strong>
             </div>
+            <div className="leg-arrival"><strong>{normalizeItineraryText(arrival)}</strong></div>
             <div className="leg-cabin">
-              {result && <span>Cabin</span>}
               <strong>{normalizeItineraryText(leg.cabin)}</strong>
             </div>
             {result && (
-              <span className={`leg-status ${leg.pending ? 'needed' : ''} ${leg.status ? `is-${leg.status}` : ''}`}>
-                {leg.constraint ? <ShieldCheck size={12} /> : <Check size={12} />}
-                {leg.constraint || 'Included'}
-              </span>
+              <>
+                <div className="leg-cost"><strong>{formatNumber(leg.economics.points)} pts</strong><small>+ ${formatNumber(leg.economics.fees)}</small></div>
+                <div className="leg-cash-value"><strong>${formatNumber(leg.economics.cashValue)}</strong></div>
+                <div className="leg-point-value"><strong>{leg.economics.pointValue.toFixed(1)}¢</strong><small>per point</small></div>
+              </>
             )}
           </div>
           )
@@ -994,13 +951,52 @@ function FlightLegRows({ legs, result = false, building = false, visibleCount = 
   )
 }
 
-function ProgramPicker({ linked, linking, onToggle }) {
+function ProgramPicker({ linked, onToggle }) {
   const [searchOpen, setSearchOpen] = useState(false)
+  const [connectionProgram, setConnectionProgram] = useState(null)
+  const [connectingId, setConnectingId] = useState(null)
+  const [justLinkedId, setJustLinkedId] = useState(null)
   const searchTileRef = useRef(null)
+  const linkedAnimationTimer = useRef(null)
   const featuredPrograms = programs.filter((program) => program.featured)
   const closeSearch = useCallback(() => {
     setSearchOpen(false)
     window.setTimeout(() => searchTileRef.current?.focus(), 0)
+  }, [])
+  const focusProgramTile = useCallback((programId) => {
+    window.setTimeout(() => document.querySelector(`[data-program-id="${programId}"]`)?.focus(), 0)
+  }, [])
+  const handleProgramAction = useCallback((program) => {
+    if (linked.includes(program.id)) {
+      onToggle(program.id)
+      return
+    }
+    setSearchOpen(false)
+    setConnectionProgram(program)
+  }, [linked, onToggle])
+  const startConnection = useCallback((program) => {
+    setConnectingId(program.id)
+  }, [])
+  const completeConnection = useCallback((program) => {
+    onToggle(program.id)
+    setConnectingId(null)
+    setJustLinkedId(program.id)
+    if (linkedAnimationTimer.current) window.clearTimeout(linkedAnimationTimer.current)
+    linkedAnimationTimer.current = window.setTimeout(() => setJustLinkedId(null), 1100)
+  }, [onToggle])
+  const finishConnection = useCallback((program) => {
+    setConnectionProgram(null)
+    focusProgramTile(program.id)
+  }, [focusProgramTile])
+  const closeConnection = useCallback(() => {
+    const programId = connectionProgram?.id
+    setConnectingId(null)
+    setConnectionProgram(null)
+    if (programId) focusProgramTile(programId)
+  }, [connectionProgram, focusProgramTile])
+
+  useEffect(() => () => {
+    if (linkedAnimationTimer.current) window.clearTimeout(linkedAnimationTimer.current)
   }, [])
 
   return (
@@ -1013,8 +1009,9 @@ function ProgramPicker({ linked, linking, onToggle }) {
               program={program}
               index={index}
               linked={linked}
-              linking={linking}
-              onToggle={onToggle}
+              connecting={connectingId === program.id}
+              justLinked={justLinkedId === program.id}
+              onAction={handleProgramAction}
             />
           ))}
           <button
@@ -1030,15 +1027,24 @@ function ProgramPicker({ linked, linking, onToggle }) {
           </button>
         </div>
         <span className="sr-only" role="status" aria-live="polite">
-          {linking.length ? `Connecting ${linking.length} program${linking.length === 1 ? '' : 's'}.` : linked.length ? `${linked.length} award program${linked.length === 1 ? '' : 's'} linked.` : ''}
+          {linked.length ? `${linked.length} award program${linked.length === 1 ? '' : 's'} linked.` : ''}
         </span>
       </div>
       {searchOpen && createPortal(
         <ProgramSearchModal
           linked={linked}
-          linking={linking}
-          onToggle={onToggle}
+          onProgramAction={handleProgramAction}
           onClose={closeSearch}
+        />,
+        document.body,
+      )}
+      {connectionProgram && createPortal(
+        <ProgramConnectionModal
+          program={connectionProgram}
+          onConnectionStart={startConnection}
+          onConnected={completeConnection}
+          onFinished={finishConnection}
+          onClose={closeConnection}
         />,
         document.body,
       )}
@@ -1046,27 +1052,228 @@ function ProgramPicker({ linked, linking, onToggle }) {
   )
 }
 
-function ProgramTile({ program, index, linked, linking, onToggle }) {
+function ProgramTile({ program, index, linked, connecting, justLinked, onAction }) {
   const isLinked = linked.includes(program.id)
-  const isLinking = linking.includes(program.id)
   return (
     <button
-      className={`program-tile ${isLinked ? 'linked' : ''} ${isLinking ? 'linking' : ''}`}
-      onClick={() => onToggle(program.id)}
+      className={`program-tile ${isLinked ? 'linked' : ''} ${connecting ? 'linking' : ''} ${justLinked ? 'just-linked' : ''}`}
+      data-program-id={program.id}
+      onClick={() => onAction(program)}
       style={{ '--tile-delay': `${index * 45}ms` }}
       aria-pressed={isLinked}
-      aria-busy={isLinking}
-      aria-label={`${isLinking ? 'Connecting' : isLinked ? 'Disconnect' : 'Connect'} ${program.name}${isLinked ? `, ${formatNumber(program.balance)} points linked` : ''}`}
-      disabled={isLinking}
+      aria-busy={connecting}
+      aria-label={`${connecting ? 'Connecting' : isLinked ? 'Disconnect' : 'Connect'} ${program.name}${isLinked ? `, ${formatNumber(program.balance)} points linked` : ''}`}
+      disabled={connecting}
     >
       <span className="program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
-      <span className="program-copy"><strong>{program.name}</strong><small>{isLinking ? 'Connecting demo balance…' : isLinked ? `${formatNumber(program.balance)} points` : program.program}</small></span>
-      <span className="program-action">{isLinking ? <i /> : isLinked ? <Check size={14} /> : '+'}</span>
+      <span className="program-copy"><strong>{program.name}</strong><small>{isLinked ? `${formatNumber(program.balance)} points` : program.program}</small></span>
+      <span className="program-action">{connecting ? <i /> : isLinked ? <Check size={14} /> : '+'}</span>
     </button>
   )
 }
 
-function ProgramSearchModal({ linked, linking, onToggle, onClose }) {
+function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFinished, onClose }) {
+  const [phase, setPhase] = useState('login')
+  const [connectionStep, setConnectionStep] = useState(0)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [error, setError] = useState('')
+  const [signInMethod, setSignInMethod] = useState('credentials')
+  const dialogRef = useRef(null)
+  const usernameRef = useRef(null)
+  const passwordRef = useRef(null)
+  const connectionTimers = useRef([])
+  const stageCopy = [
+    `Signing in to ${program.name}`,
+    'Encrypting your account details',
+    'Syncing your rewards balance',
+  ]
+
+  const queueConnectionTimer = (callback, delay) => {
+    const timer = window.setTimeout(() => {
+      connectionTimers.current = connectionTimers.current.filter((timerId) => timerId !== timer)
+      callback()
+    }, delay)
+    connectionTimers.current.push(timer)
+  }
+
+  const beginConnection = (method) => {
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    setSignInMethod(method)
+    setError('')
+    setConnectionStep(0)
+    setPhase('connecting')
+    onConnectionStart(program)
+    queueConnectionTimer(() => setConnectionStep(1), reducedMotion ? 80 : 650)
+    queueConnectionTimer(() => setConnectionStep(2), reducedMotion ? 150 : 1320)
+    queueConnectionTimer(() => {
+      setPhase('success')
+      onConnected(program)
+      queueConnectionTimer(() => onFinished(program), reducedMotion ? 320 : 1200)
+    }, reducedMotion ? 230 : 2200)
+  }
+
+  const submitCredentials = (event) => {
+    event.preventDefault()
+    if (!username.trim()) {
+      setError('Enter a username or email to continue.')
+      usernameRef.current?.focus()
+      return
+    }
+    if (!password) {
+      setError('Enter your password to continue.')
+      passwordRef.current?.focus()
+      return
+    }
+    beginConnection('credentials')
+  }
+
+  useEffect(() => {
+    const focusTimer = window.setTimeout(() => usernameRef.current?.focus(), 100)
+    return () => window.clearTimeout(focusTimer)
+  }, [])
+
+  useEffect(() => {
+    if (phase !== 'login') dialogRef.current?.focus()
+  }, [phase])
+
+  useEffect(() => {
+    const handleDialogKeys = (event) => {
+      if (event.key === 'Escape' && phase === 'login') {
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const focusable = [...dialogRef.current.querySelectorAll('button:not(:disabled), input:not(:disabled), [tabindex="0"]')]
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable.at(-1)
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    window.addEventListener('keydown', handleDialogKeys)
+    return () => window.removeEventListener('keydown', handleDialogKeys)
+  }, [onClose, phase])
+
+  useEffect(() => () => {
+    connectionTimers.current.forEach(window.clearTimeout)
+    connectionTimers.current = []
+  }, [])
+
+  return (
+    <div className="connection-backdrop" onMouseDown={(event) => event.target === event.currentTarget && phase === 'login' && onClose()}>
+      <section
+        ref={dialogRef}
+        className={`connection-modal connection-modal--${phase}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="connection-title"
+        aria-describedby="connection-description"
+        tabIndex="-1"
+      >
+        <header className="connection-modal-bar">
+          <span><LockKeyhole size={12} /> Secure connection</span>
+          {phase === 'login' && <button onClick={onClose} aria-label={`Close ${program.name} sign in`}><X size={16} /></button>}
+        </header>
+
+        {phase === 'login' && (
+          <div className="connection-login">
+            <div className="connection-program-brand">
+              <span className="connection-program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
+              <span>Powered by <strong>{program.name}</strong></span>
+            </div>
+            <h2 id="connection-title">Sign in to {program.name}</h2>
+            <p id="connection-description">Connect {program.program} so Vetra can include your balance in this search.</p>
+
+            <form className="connection-form" onSubmit={submitCredentials} noValidate>
+              <label>
+                <span>Username or email</span>
+                <input
+                  ref={usernameRef}
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  autoComplete="username"
+                  placeholder="name@example.com"
+                  aria-invalid={Boolean(error && !username.trim())}
+                />
+              </label>
+              <label>
+                <span>Password</span>
+                <div className="connection-password-field">
+                  <input
+                    ref={passwordRef}
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoComplete="current-password"
+                    placeholder="Enter your password"
+                    aria-invalid={Boolean(error && username.trim() && !password)}
+                  />
+                  <button type="button" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              </label>
+              {error && <p className="connection-error" role="alert"><CircleAlert size={13} /> {error}</p>}
+              <button className="connection-submit" type="submit">Sign in securely <ArrowRight size={15} /></button>
+            </form>
+
+            <div className="connection-divider"><span>or</span></div>
+            <button className="connection-google" type="button" onClick={() => beginConnection('google')}>
+              <span aria-hidden="true">G</span> Sign in with Google
+            </button>
+            <p className="connection-privacy"><ShieldCheck size={13} /> Demo connection only. Credentials are never stored or transmitted.</p>
+          </div>
+        )}
+
+        {phase === 'connecting' && (
+          <div className="connection-progress" aria-live="polite">
+            <div className="connection-bridge" aria-hidden="true">
+              <span className="connection-program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
+              <span className="connection-bridge-track"><i /><i /><i /></span>
+              <span className="connection-vetra-mark"><i /><i /></span>
+            </div>
+            <span className="connection-eyebrow">Encrypted connection</span>
+            <h2 id="connection-title">Securely connecting</h2>
+            <p id="connection-description">{signInMethod === 'google' && connectionStep === 0 ? 'Confirming your Google identity' : stageCopy[connectionStep]}</p>
+            <ol className="connection-stages">
+              {stageCopy.map((stage, index) => (
+                <li className={index < connectionStep ? 'complete' : index === connectionStep ? 'active' : ''} key={stage}>
+                  <span>{index < connectionStep ? <Check size={11} /> : index + 1}</span>
+                  {stage}
+                </li>
+              ))}
+            </ol>
+            <p className="connection-privacy"><LockKeyhole size={12} /> 256-bit encrypted demo session</p>
+          </div>
+        )}
+
+        {phase === 'success' && (
+          <div className="connection-success" aria-live="polite">
+            <span className="connection-success-mark"><CheckCircle2 size={33} /></span>
+            <span className="connection-eyebrow">Connection complete</span>
+            <h2 id="connection-title">{program.name} is connected</h2>
+            <p id="connection-description">Your rewards balance is ready to use in this search.</p>
+            <div className="connection-balance">
+              <span className="connection-program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
+              <div><small>{program.program}</small><strong>{formatNumber(program.balance)} points</strong></div>
+              <Check size={15} />
+            </div>
+            <span className="connection-closing">Returning to your trip…</span>
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function ProgramSearchModal({ linked, onProgramAction, onClose }) {
   const [query, setQuery] = useState('')
   const inputRef = useRef(null)
   const searchablePrograms = useMemo(() => programs.filter((program) => !program.featured), [])
@@ -1110,19 +1317,16 @@ function ProgramSearchModal({ linked, linking, onToggle, onClose }) {
         <div className="program-search-list">
           {filteredPrograms.map((program) => {
             const isLinked = linked.includes(program.id)
-            const isLinking = linking.includes(program.id)
             return (
               <button
                 key={program.id}
                 className={`program-search-result ${isLinked ? 'linked' : ''}`}
-                onClick={() => onToggle(program.id)}
-                disabled={isLinking}
+                onClick={() => onProgramAction(program)}
                 aria-pressed={isLinked}
-                aria-busy={isLinking}
               >
                 <span className="program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
-                <span className="program-copy"><strong>{program.name}</strong><small>{isLinking ? 'Connecting demo balance…' : isLinked ? `${formatNumber(program.balance)} points linked` : program.program}</small></span>
-                <span className="program-action">{isLinking ? <i /> : isLinked ? <Check size={14} /> : '+'}</span>
+                <span className="program-copy"><strong>{program.name}</strong><small>{isLinked ? `${formatNumber(program.balance)} points linked` : program.program}</small></span>
+                <span className="program-action">{isLinked ? <Check size={14} /> : '+'}</span>
               </button>
             )
           })}
@@ -1133,7 +1337,7 @@ function ProgramSearchModal({ linked, linking, onToggle, onClose }) {
   )
 }
 
-function OptimizationView({ step, linkedPrograms, finishing }) {
+function OptimizationView({ step, linkedPrograms, finishing, brief }) {
   return (
     <main className={`optimization-view ${finishing ? 'optimization-view--finishing' : ''}`}>
       <div className="optimization-orbit" aria-hidden="true">
@@ -1143,7 +1347,7 @@ function OptimizationView({ step, linkedPrograms, finishing }) {
       <section className="optimization-copy" aria-live="polite">
         <span className="step-label">Intelligent optimization</span>
         <h1>Building your best ways to fly.</h1>
-        <p>{linkedPrograms.length ? `Using ${linkedPrograms.length} linked balance${linkedPrograms.length === 1 ? '' : 's'} alongside cash alternatives.` : 'Comparing cash and publicly available award options without linked balances.'}</p>
+        <p>{linkedPrograms.length ? `Using ${linkedPrograms.length} linked balance${linkedPrograms.length === 1 ? '' : 's'} alongside cash alternatives for ${brief?.route || 'your finalized route'}.` : `Comparing illustrative cash and award options for ${brief?.route || 'your finalized route'} without linked balances.`}</p>
         <div className="optimization-list">
           {optimizationStages.map((stage, index) => (
             <div className={index < step ? 'complete' : index === step ? 'active' : ''} key={stage.label}>
@@ -1157,22 +1361,37 @@ function OptimizationView({ step, linkedPrograms, finishing }) {
   )
 }
 
-function ResultsView({ linkedPrograms, totalBalance, expanded, onExpand, onReset }) {
+function ResultsView({ linkedPrograms, totalBalance, brief, expanded, onExpand, onReset }) {
+  const recommendations = useMemo(() => buildDemoRecommendations(brief), [brief])
   return (
     <main className="results-view">
       <section className="results-heading">
         <span className="step-label"><Sparkles size={13} /> Optimization complete</span>
         <h1>Three strong ways to make this trip work.</h1>
-        <p>{linkedPrograms.length ? `${formatNumber(totalBalance)} linked points were considered. ` : 'No balances were linked, so point funding is illustrative. '}The first option offers the best balance of comfort, value, and booking simplicity.</p>
+        <p>{linkedPrograms.length ? `${formatNumber(totalBalance)} linked points were considered.` : 'No balances were linked, so point funding is illustrative.'}</p>
+      </section>
+      <section className="results-itinerary-handoff" aria-labelledby="finalized-itinerary-title">
+        <header>
+          <h2 id="finalized-itinerary-title">{normalizeItineraryText(brief?.route)}</h2>
+        </header>
+        <div className="results-plan-legs" style={{ '--plan-leg-count': Math.max(brief?.flightLegs?.length || 0, 1) }}>
+          {(brief?.flightLegs || []).map((leg, index) => (
+            <div key={leg.legId}>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <strong>{normalizeItineraryText(leg.route)}</strong>
+              <small>{normalizeItineraryText(leg.timing)}</small>
+            </div>
+          ))}
+        </div>
       </section>
       <section className="result-list">
         {recommendations.map((result, index) => (
           <article className={`result-card ${expanded === index ? 'expanded' : ''}`} key={result.title} style={{ '--result-color': result.color, '--tile-delay': `${index * 90}ms` }}>
-            <button className="result-summary" onClick={() => onExpand(expanded === index ? -1 : index)} aria-expanded={expanded === index}>
+            <button className="result-summary" data-testid={`result-summary-${index + 1}`} onClick={() => onExpand(expanded === index ? -1 : index)} aria-expanded={expanded === index}>
               <span className="result-rank">0{index + 1}</span>
-              <span className="result-title"><small>{result.label}</small><strong>{result.title}</strong><em>{result.detail}</em></span>
+              <span className="result-title"><small>{result.label}</small><strong>{result.title}</strong></span>
               <span className="result-metric"><small>Trip total</small><strong>{result.points}</strong><em>{result.fees}</em></span>
-              <span className="result-metric"><small>Point value</small><strong>{result.value}</strong><em>modeled value</em></span>
+              <span className="result-metric"><small>Point value</small><strong>{result.value}</strong></span>
               <span className="result-score"><strong>{result.score}</strong><small>Vetra score</small></span>
               <span className="result-chevron">⌄</span>
             </button>
@@ -1184,16 +1403,22 @@ function ResultsView({ linkedPrograms, totalBalance, expanded, onExpand, onReset
                     <FlightLegRows legs={result.segments} result />
                   </section>
                   <aside className="result-rationale">
-                    <div className="detail-heading"><span>Decision Brief</span><strong>Why This Ranks #{index + 1}</strong></div>
-                    <ol>
-                      {result.rationale.map((reason, reasonIndex) => (
-                        <li key={reason.label}>
-                          <span>{String(reasonIndex + 1).padStart(2, '0')}</span>
-                          <div><small>{reason.label}</small><strong>{reason.value}</strong></div>
-                        </li>
-                      ))}
-                    </ol>
-                    <button>View Booking Plan <ArrowRight size={14} /></button>
+                    <div className="detail-heading"><span>Pros &amp; Cons</span><strong>Why This Ranks #{index + 1}</strong></div>
+                    <p className="result-rationale-summary">{result.detail}</p>
+                    <div className="tradeoff-groups">
+                      <section className="tradeoff-group tradeoff-group--pros">
+                        <h3><Check size={12} /> {result.pros.length} Pros</h3>
+                        <ul>
+                          {result.pros.map((pro) => <li key={pro}>{pro}</li>)}
+                        </ul>
+                      </section>
+                      <section className="tradeoff-group tradeoff-group--cons">
+                        <h3><X size={12} /> {result.cons.length} {result.cons.length === 1 ? 'Con' : 'Cons'}</h3>
+                        <ul>
+                          {result.cons.map((con) => <li key={con}>{con}</li>)}
+                        </ul>
+                      </section>
+                    </div>
                   </aside>
                 </div>
               </div>
@@ -1201,7 +1426,7 @@ function ResultsView({ linkedPrograms, totalBalance, expanded, onExpand, onReset
           </article>
         ))}
       </section>
-      <button className="new-trip-button" onClick={onReset}>Plan another trip</button>
+      <button className="new-trip-button" onClick={onReset}>Plan another trip <ArrowRight size={15} /></button>
     </main>
   )
 }

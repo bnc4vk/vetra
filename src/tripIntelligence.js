@@ -141,6 +141,16 @@ function replaceScopedLocation(value, scope, answer) {
   return value.toLowerCase() === scope.toLowerCase() ? answer : value
 }
 
+export function normalizeCityName(value) {
+  const normalized = String(value || '').trim().replace(/\s+/g, ' ')
+  if (!normalized) return normalized
+  if (/^[A-Z]{2,4}$/.test(normalized)) return normalized
+  if (/[A-Z]/.test(normalized) && /[a-z]/.test(normalized)) return normalized
+  return normalized
+    .toLocaleLowerCase()
+    .replace(/(^|[\s'’-])([a-z])/g, (_, separator, letter) => `${separator}${letter.toUpperCase()}`)
+}
+
 function refreshBrief(brief, flightLegs, extras = {}) {
   const normalizedLegs = flightLegs.map((leg) => ({ ...leg, route: `${leg.origin} → ${leg.destination}` }))
   const cities = normalizedLegs.length
@@ -150,7 +160,9 @@ function refreshBrief(brief, flightLegs, extras = {}) {
 }
 
 export function applyFollowUpToBrief(brief, followUp, answer) {
-  const normalizedAnswer = answer.trim()
+  const normalizedAnswer = /destination|city|airport|location/i.test(followUp?.key || followUp?.field || '')
+    ? normalizeCityName(answer)
+    : answer.trim()
   const field = followUp?.key || followUp?.field || ''
   const scope = followUp?.scope || ''
 
@@ -195,7 +207,7 @@ export function applyFollowUpToBrief(brief, followUp, answer) {
 function updatedLeg(leg, field, value, valueKind) {
   const next = { ...leg, resolved: false, status: 'captured', statusLabel: 'Captured' }
   if (field === 'origin' || field === 'destination') {
-    next[field] = value
+    next[field] = valueKind === 'city' ? normalizeCityName(value) : value
     next[`${field}Kind`] = valueKind
   }
   if (field === 'timing') {
