@@ -70,17 +70,22 @@ The deployable demo keeps frontend and secret-bearing backend separate:
 - A failed or ambiguous OpenAI request keeps its full reservation in the hosted ledger.
 
 The source and Pages workflow now live in this single repository. Vercel deployment is
-managed by the same GitHub Actions release workflow as Pages. Pull requests must pass the production
-build and all regression suites. After a merge to `main`, the workflow deploys the API first, checks
-the immutable deployment and stable alias for the exact Git commit and API contract, then deploys
-Pages and verifies that the public site responds successfully. Production releases are serialized so
-two close merges cannot race each other.
+managed by the same GitHub Actions release workflow as Pages. Direct pushes and merges to `main`
+remain available. Each update runs the production build and regression suites, uploads the candidate
+API without changing the production alias, verifies the candidate's readiness, exact Git revision,
+and API contract, then promotes it. Only after the verified API is live does the workflow deploy
+Pages and verify that the public site responds successfully. Production releases are serialized so
+two close updates cannot race each other.
 
 The release workflow requires repository variables `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, and
 `VETRA_API_BASE_URL`, plus a `VERCEL_TOKEN` repository secret. Prefer a project-scoped token whenever
-the Vercel account permits creating one. The `Validate` check is required on `main`; direct pushes,
-force pushes, branch deletion, unresolved review conversations, and merges with stale validation are
-blocked by branch protection.
+the Vercel account permits creating one. If candidate verification fails, production is never changed.
+If a post-promotion check fails, the workflow restores the previously recorded Vercel deployment.
+Any validation or deployment failure opens a `deployment-failure` issue mentioning the triggering
+actor and linking the failed workflow, providing a durable audit trail without generating a noisy
+automatic revert PR. GitHub's normal Actions and mention notifications provide email when enabled in
+the recipient's notification settings. Ordinary pushes to `main` are allowed; force pushes and branch
+deletion remain disabled.
 
 Required backend secrets are documented in `.env.example`. OpenAI recommends keeping API
 keys out of source code and public repositories and exposing them to applications through
