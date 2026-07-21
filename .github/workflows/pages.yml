@@ -72,7 +72,7 @@ jobs:
       - name: Deploy production API
         id: deploy
         run: |
-          deployment_url="$(vercel deploy --prod --yes --token="$VERCEL_TOKEN" --env VETRA_DEPLOYMENT_SHA="$GITHUB_SHA" --meta githubCommitSha="$GITHUB_SHA")"
+          deployment_url="$(vercel deploy --prod --yes --no-wait --token="$VERCEL_TOKEN" --env VETRA_DEPLOYMENT_SHA="$GITHUB_SHA" --meta githubCommitSha="$GITHUB_SHA")"
           echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
       - name: Verify immutable Vercel deployment
         run: vercel inspect "${{ steps.deploy.outputs.url }}" --wait --timeout 3m --token="$VERCEL_TOKEN"
