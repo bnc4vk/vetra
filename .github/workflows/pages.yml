@@ -74,11 +74,8 @@ jobs:
         run: |
           deployment_url="$(vercel deploy --prod --yes --token="$VERCEL_TOKEN" --env VETRA_DEPLOYMENT_SHA="$GITHUB_SHA" --meta githubCommitSha="$GITHUB_SHA")"
           echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
-      - name: Verify immutable API deployment
-        env:
-          EXPECTED_DEPLOYMENT_SHA: ${{ github.sha }}
-          VETRA_API_BASE_URL: ${{ steps.deploy.outputs.url }}
-        run: npm run test:hosted-contract
+      - name: Verify immutable Vercel deployment
+        run: vercel inspect "${{ steps.deploy.outputs.url }}" --wait --timeout 3m --token="$VERCEL_TOKEN"
       - name: Verify production API alias
         env:
           EXPECTED_DEPLOYMENT_SHA: ${{ github.sha }}
