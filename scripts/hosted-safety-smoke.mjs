@@ -30,6 +30,10 @@ let response = responseRecorder()
 await handler({ method: 'GET', url: '/api/health', headers: {}, query: { route: 'health' } }, response)
 assert.equal(response.statusCode, 200)
 assert.equal(response.body.model, 'gpt-5.4-2026-03-05')
+assert.deepEqual(response.body.contractVersions, {
+  tripIntent: 'itinerary-intent/v1',
+  itineraryAdjustment: 'itinerary-adjustment/v1',
+})
 assert.equal(response.body.readyForGpt, false)
 assert.equal(response.body.quotaStoreConfigured, false)
 

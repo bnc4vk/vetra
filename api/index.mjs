@@ -3,6 +3,7 @@ import { zodTextFormat } from 'openai/helpers/zod'
 import {
   ParsedItineraryAdjustment,
   ParsedTripIntent,
+  ITINERARY_ADJUSTMENT_VERSION,
   normalizeParsedItineraryAdjustment,
   normalizeParsedTripIntent,
   ITINERARY_ADJUSTMENT_MAX_OUTPUT_TOKENS,
@@ -10,6 +11,7 @@ import {
   TRIP_INTERPRETATION_MAX_OUTPUT_TOKENS,
   TRIP_INTERPRETATION_MODEL,
   TRIP_INTERPRETATION_PROMPT,
+  TRIP_INTENT_VERSION,
 } from '../shared/trip-intelligence.mjs'
 
 const model = TRIP_INTERPRETATION_MODEL
@@ -173,6 +175,10 @@ export default async function handler(request, response) {
       quotaStoreConfigured: Boolean(redisUrl && redisToken),
       readyForGpt: hostedReady && Boolean(usage),
       model,
+      contractVersions: {
+        tripIntent: TRIP_INTENT_VERSION,
+        itineraryAdjustment: ITINERARY_ADJUSTMENT_VERSION,
+      },
       billingSafety: 'fail-closed-atomic-hosted-quota',
       usage,
     })
