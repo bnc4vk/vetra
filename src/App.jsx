@@ -25,6 +25,8 @@ import {
   validateItinerary,
 } from './tripIntelligence'
 import { buildDemoRecommendations } from './flightRecommendations'
+import vetraLogo from './assets/vetra-logo.png'
+import vetraMark from './assets/vetra-mark.png'
 
 const FlightGlobe = lazy(() => import('./FlightGlobe'))
 
@@ -262,8 +264,7 @@ function normalizeItineraryText(value) {
 function Brand() {
   return (
     <div className="brand" aria-label="Vetra">
-      <span className="brand-mark" aria-hidden="true"><i /><i /></span>
-      <span>vetra</span>
+      <img className="brand-logo" src={vetraLogo} alt="Vetra" />
     </div>
   )
 }
@@ -1431,7 +1432,7 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
             <div className="connection-bridge" aria-hidden="true">
               <span className="connection-program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
               <span className="connection-bridge-track"><i /><i /><i /></span>
-              <span className="connection-vetra-mark"><i /><i /></span>
+              <span className="connection-vetra-mark"><img src={vetraMark} alt="" aria-hidden="true" /></span>
             </div>
             <h2 id="connection-title">Securely connecting</h2>
             <p id="connection-description" className="sr-only">Connecting {program.name} to Vetra.</p>

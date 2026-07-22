@@ -148,7 +148,7 @@ function createLabelSprite(location) {
   context.strokeStyle = 'rgba(92,107,103,.18)'
   context.lineWidth = 1.5
   context.stroke()
-  context.fillStyle = '#6a61df'
+  context.fillStyle = '#f2542d'
   context.beginPath()
   context.arc(57, 42, 7, 0, Math.PI * 2)
   context.fill()
@@ -186,7 +186,7 @@ function createPlane() {
   shape.closePath()
   const geometry = new THREE.ExtrudeGeometry(shape, { depth: .014, bevelEnabled: true, bevelSize: .006, bevelThickness: .006, bevelSegments: 2 })
   geometry.center()
-  const material = new THREE.MeshStandardMaterial({ color: '#f7f8ff', emissive: '#766df2', emissiveIntensity: .9, metalness: .38, roughness: .28 })
+  const material = new THREE.MeshStandardMaterial({ color: '#fff8f5', emissive: '#f26a3d', emissiveIntensity: .9, metalness: .38, roughness: .28 })
   return new THREE.Mesh(geometry, material)
 }
 
@@ -241,7 +241,7 @@ export default function FlightGlobe({ brief, onFirstTraversalComplete }) {
         transparent: true,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
-        uniforms: { glowColor: { value: new THREE.Color('#867df2') } },
+        uniforms: { glowColor: { value: new THREE.Color('#f2855e') } },
         vertexShader: 'varying vec3 vNormal; void main(){ vNormal = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
         fragmentShader: 'uniform vec3 glowColor; varying vec3 vNormal; void main(){ float intensity = pow(0.72 - dot(vNormal, vec3(0.0,0.0,1.0)), 2.25); gl_FragColor = vec4(glowColor, intensity * 0.34); }',
       }),
@@ -252,7 +252,7 @@ export default function FlightGlobe({ brief, onFirstTraversalComplete }) {
     const keyLight = new THREE.DirectionalLight(0xffffff, 3.25)
     keyLight.position.set(-3, 4, 5)
     scene.add(keyLight)
-    const rimLight = new THREE.DirectionalLight(0x8d83ff, 2.1)
+    const rimLight = new THREE.DirectionalLight(0xff8a5c, 2.1)
     rimLight.position.set(4, -1, -3)
     scene.add(rimLight)
 
@@ -262,8 +262,8 @@ export default function FlightGlobe({ brief, onFirstTraversalComplete }) {
       const tube = new THREE.Mesh(
         new THREE.TubeGeometry(curve, Math.max(48, points.length), ambient ? .006 : .009, 7, closed),
         new THREE.MeshStandardMaterial({
-          color: '#7168ed',
-          emissive: '#756cf2',
+          color: '#f2542d',
+          emissive: '#f26a3d',
           emissiveIntensity: ambient ? .7 : 1.2,
           transparent: true,
           opacity: ambient ? .26 : .64,
@@ -274,7 +274,7 @@ export default function FlightGlobe({ brief, onFirstTraversalComplete }) {
       const linePoints = closed ? [...points, points[0]] : points
       const dashedGeometry = new THREE.BufferGeometry().setFromPoints(linePoints)
       const dashedMaterial = new THREE.LineDashedMaterial({
-        color: '#f4f2ff',
+        color: '#fff4ef',
         transparent: true,
         opacity: ambient ? .48 : .86,
         dashSize: ambient ? .055 : .075,
@@ -326,13 +326,13 @@ export default function FlightGlobe({ brief, onFirstTraversalComplete }) {
       const normalizedVector = vector.clone().normalize()
       const marker = new THREE.Mesh(
         new THREE.SphereGeometry(.036, 20, 20),
-        new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#756cf2', emissiveIntensity: 1.5, roughness: .28 }),
+        new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#f26a3d', emissiveIntensity: 1.5, roughness: .28 }),
       )
       marker.position.copy(vector)
       globeGroup.add(marker)
       const halo = new THREE.Mesh(
         new THREE.RingGeometry(.052, .075, 32),
-        new THREE.MeshBasicMaterial({ color: '#8c84f5', transparent: true, opacity: .72, side: THREE.DoubleSide, depthWrite: false }),
+        new THREE.MeshBasicMaterial({ color: '#f5a184', transparent: true, opacity: .72, side: THREE.DoubleSide, depthWrite: false }),
       )
       halo.position.copy(vector.clone().normalize().multiplyScalar(EARTH_RADIUS + .047))
       halo.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), vector.clone().normalize())
@@ -346,7 +346,7 @@ export default function FlightGlobe({ brief, onFirstTraversalComplete }) {
     const plane = createPlane()
     plane.scale.setScalar(.78)
     globeGroup.add(plane)
-    const planeGlow = new THREE.PointLight(0x756cf2, 1.1, .48, 2)
+    const planeGlow = new THREE.PointLight(0xf26a3d, 1.1, .48, 2)
     plane.add(planeGlow)
 
     const traversalMs = Math.max(MIN_TRAVERSAL_MS, segments.length * 2400)
