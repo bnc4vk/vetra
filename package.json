@@ -8,6 +8,8 @@
     "build": "vite build",
     "test:itinerary": "node scripts/itinerary-intent-smoke.mjs",
     "test:results": "node scripts/results-continuity-smoke.mjs",
+    "test:globe": "node scripts/globe-location-smoke.mjs",
+    "generate:airports": "node scripts/generate-major-airports.mjs",
     "test:safety": "node scripts/safety-smoke.mjs",
     "test:hosted-safety": "node scripts/hosted-safety-smoke.mjs",
     "test:hosted-contract": "node scripts/hosted-contract-smoke.mjs",
@@ -15,15 +17,18 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
+    "d3-geo": "^3.1.1",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "lucide-react": "^0.468.0",
     "openai": "^6.0.0",
     "react": "latest",
     "react-dom": "latest",
+    "three": "^0.185.1",
+    "topojson-client": "^3.1.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
+    "world-atlas": "^2.0.2",
     "zod": "^3.24.1"
-  },
-  "devDependencies": {}
+  }
 }
