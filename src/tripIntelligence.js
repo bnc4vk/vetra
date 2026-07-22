@@ -102,7 +102,7 @@ function legFromIntent(leg, index, idPrefix = 'leg') {
     timingEvidence: leg.timing?.evidence || leg.timingEvidence || 'missing',
     cabin: leg.cabin?.label || leg.cabin || 'Not Specified',
     cabinEvidence: leg.cabin?.evidence || leg.cabinEvidence || 'missing',
-    detail: leg.detail || 'Flight Leg',
+    detail: leg.detail || 'Flight leg',
     status: pending ? 'needed' : (leg.status || 'captured'),
     statusLabel: pending ? 'City Needed' : (leg.statusLabel || 'Captured'),
     pending,
@@ -328,7 +328,7 @@ export function validateItinerary(legs) {
     const unresolvedOrigin = leg.originKind === 'broad_location' || (!leg.originKind && isBroadLocation(leg.origin))
     const unresolvedDestination = leg.destinationKind === 'broad_location' || (!leg.destinationKind && isBroadLocation(leg.destination))
     if (unresolvedOrigin || unresolvedDestination || leg.pending) {
-      issues.push({ id: `city-${leg.legId}`, type: 'city', legIds: [leg.legId], message: `Choose a city for ${unresolvedOrigin ? leg.origin : leg.destination} on leg ${index + 1}.` })
+      issues.push({ id: `city-${leg.legId}`, type: 'city', legIds: [leg.legId], message: `Choose a city for ${unresolvedOrigin ? leg.origin : leg.destination} on flight leg ${index + 1}.` })
     }
     const currentDate = parseComparableDate(leg.timing)
     if (currentDate) {
@@ -338,7 +338,7 @@ export function validateItinerary(legs) {
           id: `time-${conflictingPrior.leg.legId}-${leg.legId}`,
           type: 'timing',
           legIds: [conflictingPrior.leg.legId, leg.legId],
-          message: `Leg ${index + 1} is dated before leg ${conflictingPrior.index + 1}.`,
+          message: `Flight leg ${index + 1} is dated before flight leg ${conflictingPrior.index + 1}.`,
         })
       }
       priorDatedLegs.push({ leg, index, date: currentDate })

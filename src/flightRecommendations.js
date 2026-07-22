@@ -1,3 +1,5 @@
+import { demoLegPricingService } from './demoLegPricing.js'
+
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
@@ -6,8 +8,8 @@ const MONTHS = [
 const CANDIDATE_CONFIGS = [
   {
     label: 'Best overall',
-    title: 'Aeroplan-led itinerary',
-    detail: 'A premium-economy outbound and balanced airports create the strongest overall trade-off',
+    title: 'Balanced itinerary',
+    detail: 'A premium-economy outbound and balanced airports create the strongest overall trade-off.',
     color: '#6258d6',
     departureTimes: ['9:10 AM', '4:10 PM', '11:00 AM'],
     arrivalTimes: ['1:35 PM', '6:45 PM', '10:40 AM'],
@@ -15,11 +17,6 @@ const CANDIDATE_CONFIGS = [
     carriers: ['Air Canada partner award', 'ANA · NH 865', 'Air Canada partner award'],
     defaultCabins: ['Premium Economy', 'Economy', 'Economy'],
     routes: ['JFK → HND', 'HND → GMP', 'ICN → JFK'],
-    segmentEconomics: [
-      { points: 65000, fees: 104, cashValue: 3400 },
-      { points: 28000, fees: 64, cashValue: 464 },
-      { points: 75000, fees: 144, cashValue: 3000 },
-    ],
     tradeoffs: [
       { dimension: 'airport_balance', sentiment: 'pro', label: 'Balanced airport choices', weight: 8 },
       { dimension: 'carrier_complexity', sentiment: 'con', label: 'Mixed-carrier itinerary', weight: 4 },
@@ -27,8 +24,8 @@ const CANDIDATE_CONFIGS = [
   },
   {
     label: 'Best point value',
-    title: 'ANA + United itinerary',
-    detail: 'The strongest redemption return, with more airport and booking-path complexity',
+    title: 'High-value itinerary',
+    detail: 'The strongest redemption return, with more airport and booking-path complexity.',
     color: '#be477e',
     departureTimes: ['10:15 AM', '1:20 PM', '10:00 AM'],
     arrivalTimes: ['2:40 PM', '3:55 PM', '9:35 AM'],
@@ -36,11 +33,6 @@ const CANDIDATE_CONFIGS = [
     carriers: ['ANA · partner award', 'Asiana · OZ 101', 'United partner award'],
     defaultCabins: ['Economy', 'Economy', 'Economy'],
     routes: ['EWR → NRT', 'NRT → ICN', 'ICN → EWR'],
-    segmentEconomics: [
-      { points: 55000, fees: 228, cashValue: 2950 },
-      { points: 25000, fees: 95, cashValue: 519 },
-      { points: 65000, fees: 361, cashValue: 3450 },
-    ],
     tradeoffs: [
       { dimension: 'booking_flexibility', sentiment: 'pro', label: 'Multiple partner booking paths', weight: 6 },
       { dimension: 'alternate_airports', sentiment: 'con', label: 'Alternate airports in New York and Tokyo', weight: 5 },
@@ -48,8 +40,8 @@ const CANDIDATE_CONFIGS = [
   },
   {
     label: 'Simplest booking',
-    title: 'United-led itinerary',
-    detail: 'The cleanest booking path, with a lower redemption return and less schedule flexibility',
+    title: 'Streamlined itinerary',
+    detail: 'The cleanest booking path, with a lower redemption return and less schedule flexibility.',
     color: '#17806c',
     departureTimes: ['11:30 AM', '3:45 PM', '6:15 PM'],
     arrivalTimes: ['3:55 PM', '6:20 PM', '5:50 PM'],
@@ -57,11 +49,6 @@ const CANDIDATE_CONFIGS = [
     carriers: ['United · UA 131', 'United partner award', 'United · partner award'],
     defaultCabins: ['Economy', 'Economy', 'Economy'],
     routes: ['EWR → HND', 'HND → ICN', 'ICN → EWR'],
-    segmentEconomics: [
-      { points: 70000, fees: 86, cashValue: 3200 },
-      { points: 30000, fees: 54, cashValue: 508 },
-      { points: 80000, fees: 108, cashValue: 3200 },
-    ],
     tradeoffs: [
       { dimension: 'booking_simplicity', sentiment: 'pro', label: 'Fewest booking steps', weight: 8 },
       { dimension: 'schedule_flexibility', sentiment: 'con', label: 'Less schedule flexibility', weight: 5 },
@@ -150,7 +137,11 @@ function aggregateEconomics(segments) {
     fees: total.fees + segment.economics.fees,
     cashValue: total.cashValue + segment.economics.cashValue,
   }), { points: 0, fees: 0, cashValue: 0 })
-  return { ...totals, pointValue: calculatePointValue(totals) }
+  return {
+    ...totals,
+    fundingMode: segments.some((segment) => segment.economics.fundingMode === 'points') ? 'points' : 'cash',
+    pointValue: calculatePointValue(totals),
+  }
 }
 
 export function candidateMeetsHardRequirements(candidate, brief, referenceYear = new Date().getFullYear()) {
@@ -186,18 +177,19 @@ export function arbitrateCandidateRecommendations(candidates) {
 
   return candidates.map((candidate) => {
     const derived = []
+    const isCashFallback = candidate.economics.fundingMode === 'cash'
     if (candidate.segments.some((segment) => /premium economy/i.test(segment.cabin))) {
-      derived.push({ dimension: 'premium_economy', sentiment: 'pro', label: 'Premium Economy on the long-haul outbound', weight: 10 })
+      derived.push({ dimension: 'premium_economy', sentiment: 'pro', label: 'Premium economy on the long-haul outbound', weight: 10 })
     }
-    if (candidate.economics.pointValue === highestPointValue) {
-      derived.push({ dimension: 'point_value', sentiment: 'pro', label: 'Highest modeled point value', weight: 14 })
-    } else if (candidate.economics.pointValue === lowestPointValue) {
-      derived.push({ dimension: 'point_value', sentiment: 'con', label: 'Lowest modeled point value', weight: 8 })
+    if (!isCashFallback && candidate.economics.pointValue === highestPointValue) {
+      derived.push({ dimension: 'point_value', sentiment: 'pro', label: 'Highest point value', weight: 14 })
+    } else if (!isCashFallback && candidate.economics.pointValue === lowestPointValue) {
+      derived.push({ dimension: 'point_value', sentiment: 'con', label: 'Lowest point value', weight: 8 })
     }
-    if (candidate.economics.fees === lowestFees) {
-      derived.push({ dimension: 'fees', sentiment: 'pro', label: 'Lowest modeled fees', weight: 6 })
-    } else if (candidate.economics.fees === highestFees) {
-      derived.push({ dimension: 'fees', sentiment: 'con', label: 'Highest modeled fees', weight: 8 })
+    if (!isCashFallback && candidate.economics.fees === lowestFees) {
+      derived.push({ dimension: 'fees', sentiment: 'pro', label: 'Lowest fees', weight: 6 })
+    } else if (!isCashFallback && candidate.economics.fees === highestFees) {
+      derived.push({ dimension: 'fees', sentiment: 'con', label: 'Highest fees', weight: 8 })
     }
 
     const tradeoffs = uniqueTradeoffs([...candidate.tradeoffs, ...derived])
@@ -215,21 +207,28 @@ export function arbitrateCandidateRecommendations(candidates) {
   }).sort((left, right) => right.arbitrationScore - left.arbitrationScore || right.economics.pointValue - left.economics.pointValue)
 }
 
-export function buildDemoRecommendations(brief, { referenceYear = new Date().getFullYear() } = {}) {
+export function searchDemoAwardOptions(brief, {
+  referenceYear = new Date().getFullYear(),
+  rewards = [],
+  pricingService = demoLegPricingService,
+} = {}) {
   const legs = brief?.flightLegs || []
   const dates = buildLegDates(brief, referenceYear)
-  const eligibleCandidates = CANDIDATE_CONFIGS.map((config) => {
+  if (!pricingService?.quote) throw new Error('A leg pricing service is required to search demo award options.')
+  const eligibleCandidates = CANDIDATE_CONFIGS.map((config, candidateIndex) => {
     const segments = legs.map((leg, legIndex) => {
       const departureDate = dates[legIndex]
       const arrivalDate = addDays(departureDate, config.arrivalDayOffsets[legIndex] || 0)
-      const economics = config.segmentEconomics[legIndex] || { points: 0, fees: 0, cashValue: 0 }
+      const cabin = requestedCabin(leg, config.defaultCabins[legIndex] || 'Economy')
+      const fundingProgram = rewards.length ? rewards[(candidateIndex + legIndex) % rewards.length] : null
+      const economics = pricingService.quote({ leg, cabin, candidateIndex, fundingProgram })
       return {
         plannedLegId: leg.legId,
         route: candidateRoute(leg, config, legIndex),
         departure: `${formatDate(departureDate)} · ${config.departureTimes[legIndex] || config.departureTimes.at(-1)}`,
         arrival: `${formatDate(arrivalDate)} · ${config.arrivalTimes[legIndex] || config.arrivalTimes.at(-1)}`,
         arrivalDate,
-        cabin: requestedCabin(leg, config.defaultCabins[legIndex] || 'Economy'),
+        cabin,
         detail: config.carriers[legIndex] || 'Partner award candidate',
         plannedRoute: leg.route,
         economics: {
@@ -239,15 +238,24 @@ export function buildDemoRecommendations(brief, { referenceYear = new Date().get
       }
     })
     const economics = aggregateEconomics(segments)
+    const fundingPrograms = [...new Map(segments
+      .map((segment) => segment.economics.fundingProgram)
+      .filter(Boolean)
+      .map((program) => [program.id, program])).values()]
     return {
       ...config,
       segments,
       economics,
-      points: `${formatNumber(economics.points)} pts`,
-      fees: `${formatCurrency(economics.fees)} fees`,
-      value: `${economics.pointValue.toFixed(1)}¢ / point`,
+      fundingPrograms,
+      points: economics.fundingMode === 'cash' ? `${formatCurrency(economics.cashValue)} cash` : `${formatNumber(economics.points)} points`,
+      fees: economics.fundingMode === 'cash' ? 'No connected programs' : `${formatCurrency(economics.fees)} fees`,
+      value: economics.fundingMode === 'cash' ? 'Cash fallback' : `${economics.pointValue.toFixed(1)}¢ per point`,
     }
   }).filter((candidate) => candidateMeetsHardRequirements(candidate, brief, referenceYear))
 
-  return arbitrateCandidateRecommendations(eligibleCandidates)
+  return eligibleCandidates
+}
+
+export function buildDemoRecommendations(brief, options = {}) {
+  return arbitrateCandidateRecommendations(searchDemoAwardOptions(brief, options))
 }

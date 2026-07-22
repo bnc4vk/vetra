@@ -80,7 +80,14 @@ export function normalizeParsedTripIntent(intent) {
   const routeCities = flightLegs.length
     ? [flightLegs[0].origin, ...flightLegs.map((leg) => leg.destination)]
     : []
-  return { ...intent, routeCities, flightLegs }
+  const followUpQuestions = [...intent.followUpQuestions]
+    .sort((left, right) => left.priority - right.priority)
+    .map((followUp) => (
+      /destination|city|airport|location/i.test(followUp.field)
+        ? { ...followUp, question: `Which city in ${followUp.scope} would you like to fly to?` }
+        : followUp
+    ))
+  return { ...intent, routeCities, flightLegs, followUpQuestions }
 }
 
 export function normalizeParsedItineraryAdjustment(adjustment) {
@@ -101,21 +108,21 @@ fares, plan activities, invent preferences, or claim availability.
 Build the route semantically, not in the order locations happen to appear in the sentence:
 - A stated home, residence, or "I live in" location is the trip origin.
 - When a bounded trip duration is given and the user does not say one-way, returning home is
-  directly implied. Include that return flight as the last leg.
-- A requirement to be in a place on a date applies to the inbound leg for that place. Preserve
+  directly implied. Include that return flight as the last flight leg.
+- A requirement to be in a place on a date applies to the inbound flight leg for that place. Preserve
   whether it is an arrival requirement; do not turn it into a departure date.
 - A desire to explore another country or city creates the next stop after the required stop.
 - If only a country is named, keep the country as the destination. Never invent a city, airport,
   year, departure date, return date, cabin preference, or traveler count.
 - Create one flightLeg for every air transfer in logical travel order, with sequence values 1..n.
 - Cabin must be "Not Specified" with evidence "missing" unless the user names a cabin.
-- Use timing kind "trip_window" for a stated trip duration without an exact leg date. Use a
+- Use timing kind "trip_window" for a stated trip duration without an exact flight-leg date. Use a
   concise label such as "Within Two-Week Trip". Use "Return Date Needed" only when a more
   exact return date is genuinely required.
 - detail and statusLabel must tersely explain the most important explicit, implied, or missing
-  fact for that leg. status="needed" means a user decision is required; status="suggested"
-  means the leg is logically implied; status="captured" means the material facts are explicit.
-- A leg whose destination is only a country must use status="needed" and a concise statusLabel
+  fact for that flight leg. status="needed" means a user decision is required; status="suggested"
+  means the flight leg is logically implied; status="captured" means the material facts are explicit.
+- A flight leg whose destination is only a country must use status="needed" and a concise statusLabel
   such as "Destination Needed", because a specific flight destination is still unresolved.
 - Every flight endpoint must ultimately be a city. A country, region, island group, or other broad
   area is not a city and remains an unresolved placeholder. Never silently choose a representative
@@ -125,10 +132,13 @@ Build the route semantically, not in the order locations happen to appear in the
   or other area that still requires the user to choose a flight city.
 - followUpQuestions must contain one city question for every distinct unresolved broad location,
   ordered in route sequence. If both South Korea and Vietnam are unresolved, return two questions,
-  not only the first. Keep each question natural and singular. field should identify a city or
-  destination. scope must be the exact unresolved location label used in flightLegs (for example,
-  the country name), not a leg number or generic phrase. Do not ask lower-value questions such as
-  cabin or travelers while any route city remains unresolved.
+  not only the first. Each question must be one direct, calm sentence in sentence case, end with a
+  question mark, address the user as "you", and contain no more than 12 words. For unresolved city
+  destinations, use "Which city in {scope} would you like to fly to?" Never substitute "visit" for
+  "fly to" and never add "please". field should identify a city or destination. scope must be the
+  exact unresolved location label used in flightLegs (for example, the country name), not a flight-leg
+  number or generic phrase. Do not ask lower-value questions such as cabin or travelers while any
+  route city remains unresolved.
 - travelers must be "Not Specified" when absent. flexibility should summarize only stated
   flexibility, otherwise "Not Specified".
 
@@ -144,28 +154,29 @@ This step edits structured intent only: do not search fares, claim availability,
 Rules:
 - Return typed operations only. The client reducer applies them to the canonical itinerary.
 - Every operation field is required by the schema. Use null or [] when a field does not apply.
-- A user may reference a leg by its one-based number or by its route, and may edit origin,
-  destination, timing, cabin, or the concise detail/status text for that leg.
-- For a single-cell edit, use type="update", one targetLegId, field and value. Changing one leg's
-  destination must not also change the next leg's origin unless the user explicitly requested both.
+- A user may reference a flight leg by its one-based number or by its route, and may edit origin,
+  destination, timing, cabin, or the concise detail/status text for that flight leg.
+- For a single-cell edit, use type="update", one targetLegId, field and value. Changing one flight
+  leg's destination must not also change the next flight leg's origin unless the user explicitly
+  requested both.
 - valueKind is required for updates: use "city" or "broad_location" for origin/destination,
   "timing" for timing, and "cabin" for cabin. Use null when the operation is not an update.
-- For a new independent leg, use type="insert", anchorLegId plus position, and legs with the new
-  complete leg specification.
-- When inserting a stop between two cities, use type="replace" on the one affected leg and provide
-  the two replacement legs in travel order.
+- For a new independent flight leg, use type="insert", anchorLegId plus position, and legs with the
+  new complete flight-leg specification.
+- When inserting a stop between two cities, use type="replace" on the one affected flight leg and
+  provide the two replacement flight legs in travel order.
 - To remove an exact flight leg, use type="remove" with its targetLegIds and no replacement legs.
   Remove only what was requested even if this leaves a route gap for the client to flag.
 - To remove a stop and reconnect its neighbors, use type="replace" on the two adjacent legs and
-  provide the single replacement leg. Do this only when the user's wording unambiguously removes
+  provide the single replacement flight leg. Do this only when the user's wording unambiguously removes
   the stop rather than only one flight leg.
-- Preserve every unmentioned cell exactly. In particular, changing one leg's destination must not
-  silently change the next leg's origin, and changing one leg's origin must not silently change the
+- Preserve every unmentioned cell exactly. In particular, changing one flight leg's destination must
+  not silently change the next flight leg's origin, and changing one flight leg's origin must not silently change the
   prior destination. Vetra leaves geographic gaps visible for the traveler to handle independently;
   do not auto-repair or invent connecting travel.
 - Preserve whether timing is depart_on, arrive_by, fixed_date, trip_window, or missing. When the user
   supplies a new date or timing, choose the matching kind and use evidence="explicit".
-- Preserve cabin values unless changed. For a new leg with no cabin, use "Not Specified" and
+- Preserve cabin values unless changed. For a new flight leg with no cabin, use "Not Specified" and
   evidence="missing".
 - Every flight endpoint should be a city. If the user adds only a country, region, or broad area,
   keep that exact label, set its originKind or destinationKind to "broad_location", set

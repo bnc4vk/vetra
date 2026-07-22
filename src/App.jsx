@@ -11,7 +11,6 @@ import {
   LockKeyhole,
   RotateCcw,
   Search,
-  ShieldCheck,
   Sparkles,
   X,
 } from 'lucide-react'
@@ -24,7 +23,7 @@ import {
   toUiTripBrief,
   validateItinerary,
 } from './tripIntelligence'
-import { buildDemoRecommendations } from './flightRecommendations'
+import { SYSTEM_CONTRACT_VERSION, systemServices } from './systemServices'
 import vetraLogo from './assets/vetra-logo.png'
 import vetraMark from './assets/vetra-mark.png'
 
@@ -32,7 +31,7 @@ const FlightGlobe = lazy(() => import('./FlightGlobe'))
 
 const WELCOME_COPY =
   'Welcome to Vetra, the intelligent flights agent personalized to your travel style and award balances.'
-const PROMPT_COPY = "Tell me where you need to be. I’ll get started on the trip planning."
+const PROMPT_COPY = "You tell me where you need to be. I’ll get started on the trip planning."
 const DEV_STEP3_BRIEF = import.meta.env.DEV
   ? 'i need to be in Tokyo on nov 12th. i live in new york. i have two total weeks that i can travel for, and want to take advantage of being in that part of the world to explore south korea'
   : ''
@@ -109,6 +108,7 @@ const DEV_BRIEF = DEV_ADJUST_MODE || DEV_RESULTS_MODE || DEV_GLOBE_MODE
   : null
 const GOOGLE_CLIENT_ID = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim()
 const PROGRAM_SEARCH_PAGE_SIZE = 20
+const PROGRAM_ROW_REVEAL_DELAY = 300
 const MOTION = {
   welcomeWord: 232,
   promptWord: 192,
@@ -123,7 +123,6 @@ const MOTION = {
   preliminaryHold: 420,
   followUpProcess: 720,
   followUpSettle: 580,
-  rewardsReveal: 720,
   awardsExit: 480,
   adjustmentMinProcess: 720,
   adjustmentCopy: 110,
@@ -132,92 +131,64 @@ const MOTION = {
   optimizationExit: 380,
 }
 
-const programs = [
-  { id: 'amex', name: 'Amex', program: 'Membership Rewards', mark: 'AM', balance: 342800, color: '#1769aa', tint: '#eaf5ff', featured: true },
-  { id: 'chase', name: 'Chase', program: 'Ultimate Rewards', mark: 'CH', balance: 186400, color: '#146b5b', tint: '#e8f6f1', featured: true },
-  { id: 'capitalone', name: 'Capital One', program: 'Miles', mark: 'C1', balance: 91800, color: '#a01f46', tint: '#fff0f4', featured: true },
-  { id: 'citi', name: 'Citi', program: 'ThankYou Rewards', mark: 'CI', balance: 128600, color: '#056dae', tint: '#eaf5fb', featured: true },
-  { id: 'bilt', name: 'Bilt', program: 'Rewards', mark: 'BI', balance: 74600, color: '#2d3132', tint: '#f0f1f1', featured: true },
-  { id: 'american', name: 'American', program: 'AAdvantage', mark: 'AA', balance: 84400, color: '#c3273c', tint: '#fff0f2', featured: true },
-  { id: 'united', name: 'United', program: 'MileagePlus', mark: 'UA', balance: 62100, color: '#174ea6', tint: '#edf3ff', featured: true },
-  { id: 'delta', name: 'Delta', program: 'SkyMiles', mark: 'DL', balance: 53750, color: '#9b1834', tint: '#fff0f4', featured: true },
-  { id: 'southwest', name: 'Southwest', program: 'Rapid Rewards', mark: 'WN', balance: 47600, color: '#304cb2', tint: '#eef1ff', featured: true },
-  { id: 'aeroplan', name: 'Aeroplan', program: 'Air Canada', mark: 'AC', balance: 41250, color: '#d8292f', tint: '#fff0f0', featured: true },
-  { id: 'flyingblue', name: 'Flying Blue', program: 'Air France · KLM', mark: 'FB', balance: 28750, color: '#293893', tint: '#eef0ff', featured: true },
-  { id: 'alaska', name: 'Alaska', program: 'Atmos Rewards', mark: 'AS', balance: 36400, color: '#005f6a', tint: '#e9f6f7', featured: true },
-  { id: 'jetblue', name: 'JetBlue', program: 'TrueBlue', mark: 'B6', balance: 23100, color: '#003876', tint: '#edf3fa', featured: true },
-  { id: 'britishairways', name: 'British Airways', program: 'The British Airways Club', mark: 'BA', balance: 52900, color: '#1b3f8b', tint: '#eef2fb' },
-  { id: 'virginatlantic', name: 'Virgin Atlantic', program: 'Flying Club', mark: 'VS', balance: 44750, color: '#c4143c', tint: '#fff0f4' },
-  { id: 'singapore', name: 'Singapore Airlines', program: 'KrisFlyer', mark: 'SQ', balance: 31800, color: '#d19b2a', tint: '#fff8e8' },
-  { id: 'emirates', name: 'Emirates', program: 'Skywards', mark: 'EK', balance: 26400, color: '#c52732', tint: '#fff0f1' },
-  { id: 'qatar', name: 'Qatar Airways', program: 'Privilege Club', mark: 'QR', balance: 35600, color: '#6d1740', tint: '#f8edf2' },
-  { id: 'cathay', name: 'Cathay Pacific', program: 'Asia Miles', mark: 'CX', balance: 24900, color: '#0c776c', tint: '#ebf7f5' },
-  { id: 'turkish', name: 'Turkish Airlines', program: 'Miles&Smiles', mark: 'TK', balance: 21400, color: '#c5162e', tint: '#fff0f2' },
-  { id: 'wellsfargo', name: 'Wells Fargo', program: 'Rewards', mark: 'WF', balance: 48600, color: '#b31b34', tint: '#fff0f2' },
-  { id: 'avianca', name: 'Avianca', program: 'LifeMiles', mark: 'AV', balance: 33700, color: '#d71920', tint: '#fff0f0' },
-  { id: 'qantas', name: 'Qantas', program: 'Frequent Flyer', mark: 'QF', balance: 29500, color: '#d51b2b', tint: '#fff0f1' },
-  { id: 'etihad', name: 'Etihad Airways', program: 'Etihad Guest', mark: 'EY', balance: 27300, color: '#8a6c3d', tint: '#f8f3ea' },
-  { id: 'korean', name: 'Korean Air', program: 'SKYPASS', mark: 'KE', balance: 19200, color: '#2369b3', tint: '#edf5fc' },
-  { id: 'bankofamerica', name: 'Bank of America', program: 'Preferred Rewards', mark: 'BO', balance: 68400, color: '#c41230', tint: '#fff0f3' },
-  { id: 'usbank', name: 'U.S. Bank', program: 'Altitude Rewards', mark: 'US', balance: 55700, color: '#154a86', tint: '#edf4fb' },
-  { id: 'barclays', name: 'Barclays', program: 'Barclays Rewards', mark: 'BC', balance: 43100, color: '#00a2df', tint: '#eaf8fd' },
-  { id: 'brex', name: 'Brex', program: 'Brex Rewards', mark: 'BX', balance: 39200, color: '#ff5a1f', tint: '#fff2ec' },
-  { id: 'rbc', name: 'RBC', program: 'Avion Rewards', mark: 'RB', balance: 67300, color: '#006ac3', tint: '#edf6ff' },
-  { id: 'td', name: 'TD', program: 'TD Rewards', mark: 'TD', balance: 51800, color: '#128842', tint: '#ebf8ef' },
-  { id: 'cibc', name: 'CIBC', program: 'Aventura', mark: 'CB', balance: 44700, color: '#8b1d41', tint: '#faeef3' },
-  { id: 'bmo', name: 'BMO', program: 'BMO Rewards', mark: 'BM', balance: 48600, color: '#0075be', tint: '#edf7fc' },
-  { id: 'sceneplus', name: 'Scene+', program: 'Scene+ Rewards', mark: 'SC', balance: 32800, color: '#7c3aed', tint: '#f3efff' },
-  { id: 'westjet', name: 'WestJet', program: 'WestJet Rewards', mark: 'WS', balance: 27900, color: '#007b83', tint: '#eaf7f7' },
-  { id: 'lufthansa', name: 'Lufthansa Group', program: 'Miles & More', mark: 'LH', balance: 38600, color: '#05164d', tint: '#eef1f8' },
-  { id: 'sas', name: 'SAS', program: 'EuroBonus', mark: 'SK', balance: 31100, color: '#12347a', tint: '#eef3fb' },
-  { id: 'finnair', name: 'Finnair', program: 'Finnair Plus', mark: 'AY', balance: 25800, color: '#0b1560', tint: '#eff1fb' },
-  { id: 'iberia', name: 'Iberia', program: 'Iberia Club', mark: 'IB', balance: 34700, color: '#d7192d', tint: '#fff0f2' },
-  { id: 'aerlingus', name: 'Aer Lingus', program: 'AerClub', mark: 'EI', balance: 22600, color: '#007a53', tint: '#eaf7f2' },
-  { id: 'tap', name: 'TAP Air Portugal', program: 'Miles&Go', mark: 'TP', balance: 28300, color: '#087c55', tint: '#edf8f3' },
-  { id: 'aegean', name: 'Aegean Airlines', program: 'Miles+Bonus', mark: 'A3', balance: 20400, color: '#164194', tint: '#edf3fc' },
-  { id: 'ita', name: 'ITA Airways', program: 'Volare', mark: 'AZ', balance: 21900, color: '#006b5c', tint: '#eaf7f4' },
-  { id: 'ana', name: 'ANA', program: 'Mileage Club', mark: 'NH', balance: 37100, color: '#17479e', tint: '#eef3fb' },
-  { id: 'jal', name: 'Japan Airlines', program: 'Mileage Bank', mark: 'JL', balance: 33400, color: '#c8102e', tint: '#fff0f3' },
-  { id: 'eva', name: 'EVA Air', program: 'Infinity MileageLands', mark: 'BR', balance: 26100, color: '#007f67', tint: '#eaf7f3' },
-  { id: 'chinaairlines', name: 'China Airlines', program: 'Dynasty Flyer', mark: 'CI', balance: 23800, color: '#8a2d78', tint: '#f8eef6' },
-  { id: 'thai', name: 'Thai Airways', program: 'Royal Orchid Plus', mark: 'TG', balance: 24700, color: '#5b2c83', tint: '#f4eff9' },
-  { id: 'garuda', name: 'Garuda Indonesia', program: 'GarudaMiles', mark: 'GA', balance: 19400, color: '#007c91', tint: '#eaf7f9' },
-  { id: 'malaysia', name: 'Malaysia Airlines', program: 'Enrich', mark: 'MH', balance: 21600, color: '#0b3c78', tint: '#eef4fb' },
-  { id: 'vietnam', name: 'Vietnam Airlines', program: 'Lotusmiles', mark: 'VN', balance: 18500, color: '#007f95', tint: '#eaf8fa' },
-  { id: 'philippine', name: 'Philippine Airlines', program: 'Mabuhay Miles', mark: 'PR', balance: 17300, color: '#003876', tint: '#edf3fa' },
-  { id: 'airindia', name: 'Air India', program: 'Maharaja Club', mark: 'AI', balance: 29200, color: '#d71920', tint: '#fff0f0' },
-  { id: 'indigo', name: 'IndiGo', program: 'BluChip', mark: '6E', balance: 15600, color: '#242f83', tint: '#eff1fb' },
-  { id: 'virginaustralia', name: 'Virgin Australia', program: 'Velocity', mark: 'VA', balance: 30500, color: '#d5003c', tint: '#fff0f4' },
-  { id: 'airnewzealand', name: 'Air New Zealand', program: 'Airpoints', mark: 'NZ', balance: 22400, color: '#111111', tint: '#f1f2f1' },
-  { id: 'latam', name: 'LATAM Airlines', program: 'LATAM Pass', mark: 'LA', balance: 31800, color: '#5c2d91', tint: '#f4effa' },
-  { id: 'copa', name: 'Copa Airlines', program: 'ConnectMiles', mark: 'CM', balance: 26900, color: '#17365d', tint: '#eff3f8' },
-  { id: 'azul', name: 'Azul', program: 'Azul Fidelidade', mark: 'AD', balance: 24700, color: '#005daa', tint: '#edf5fc' },
-  { id: 'gol', name: 'GOL', program: 'Smiles', mark: 'G3', balance: 28600, color: '#f58220', tint: '#fff5eb' },
-  { id: 'aeromexico', name: 'Aeromexico', program: 'Aeromexico Rewards', mark: 'AM', balance: 25400, color: '#0b2343', tint: '#eef2f7' },
-  { id: 'saudia', name: 'Saudia', program: 'AlFursan', mark: 'SV', balance: 23200, color: '#006c55', tint: '#eaf7f2' },
-  { id: 'oman', name: 'Oman Air', program: 'Sindbad', mark: 'WY', balance: 19800, color: '#b89c5b', tint: '#faf6ec' },
-  { id: 'elal', name: 'EL AL', program: 'Matmid', mark: 'LY', balance: 21100, color: '#0054a6', tint: '#edf5fc' },
-  { id: 'ethiopian', name: 'Ethiopian Airlines', program: 'ShebaMiles', mark: 'ET', balance: 26400, color: '#078930', tint: '#edf8f0' },
-  { id: 'kenya', name: 'Kenya Airways', program: 'Asante Rewards', mark: 'KQ', balance: 18100, color: '#b5121b', tint: '#fff0f1' },
-  { id: 'southafrican', name: 'South African Airways', program: 'Voyager', mark: 'SA', balance: 20300, color: '#007749', tint: '#eaf7f1' },
-  { id: 'egyptair', name: 'EgyptAir', program: 'EgyptAir Plus', mark: 'MS', balance: 18900, color: '#0f4c81', tint: '#eef5fa' },
-  { id: 'royalairmaroc', name: 'Royal Air Maroc', program: 'Safar Flyer', mark: 'AT', balance: 17500, color: '#c62026', tint: '#fff0f1' },
-  { id: 'marriott', name: 'Marriott', program: 'Marriott Bonvoy', mark: 'MB', balance: 96400, color: '#8b1f41', tint: '#faeef3' },
-  { id: 'hilton', name: 'Hilton', program: 'Hilton Honors', mark: 'HH', balance: 118500, color: '#003b70', tint: '#edf3f9' },
-  { id: 'hyatt', name: 'Hyatt', program: 'World of Hyatt', mark: 'HY', balance: 42600, color: '#4b7f8f', tint: '#eef6f8' },
-  { id: 'ihg', name: 'IHG', program: 'IHG One Rewards', mark: 'IH', balance: 88700, color: '#6b1d5c', tint: '#f7eef5' },
-  { id: 'wyndham', name: 'Wyndham', program: 'Wyndham Rewards', mark: 'WR', balance: 53400, color: '#005eb8', tint: '#edf5fd' },
-  { id: 'choice', name: 'Choice Hotels', program: 'Choice Privileges', mark: 'CP', balance: 39200, color: '#004b8d', tint: '#eef4fa' },
-  { id: 'accor', name: 'Accor', program: 'ALL', mark: 'AL', balance: 28400, color: '#1e1852', tint: '#f1f0f8' },
-  { id: 'radisson', name: 'Radisson', program: 'Radisson Rewards', mark: 'RR', balance: 46700, color: '#5b2b82', tint: '#f4eff9' },
+const programs = systemServices.rewards.programs
+
+const getOptimizationStages = ({ linkedProgramCount, legCount, candidateCount }) => [
+  { label: 'Mapping routes around your non-negotiables', meta: `${legCount} confirmed flight leg${legCount === 1 ? '' : 's'} carried forward` },
+  { label: 'Checking your connected rewards programs', meta: linkedProgramCount ? `${linkedProgramCount} connected program${linkedProgramCount === 1 ? '' : 's'} compared` : '0 connected programs · cash fallback enabled' },
+  { label: 'Pricing every confirmed flight leg', meta: `${legCount * candidateCount} flight leg quote${legCount * candidateCount === 1 ? '' : 's'} compared` },
+  { label: 'Ranking the strongest complete itineraries', meta: `${candidateCount} candidate itinerar${candidateCount === 1 ? 'y' : 'ies'} ranked` },
 ]
 
-const getOptimizationStages = (linkedProgramCount) => [
-  { label: 'Mapping routes around your non-negotiables', meta: '41 viable paths considered' },
-  { label: 'Checking your linked rewards programs', meta: `${linkedProgramCount} linked program${linkedProgramCount === 1 ? '' : 's'} compared` },
-  { label: 'Testing transfer combinations and fees', meta: '27 funding paths tested' },
-  { label: 'Ranking the strongest complete itineraries', meta: '3 candidate itineraries ranked' },
-]
+const LOCATION_EXAMPLES = new Map([
+  ['spain', 'Valencia'],
+  ['south korea', 'Seoul'],
+  ['vietnam', 'Hanoi'],
+  ['philippines', 'Cebu'],
+  ['japan', 'Osaka'],
+  ['italy', 'Florence'],
+  ['france', 'Lyon'],
+  ['greece', 'Thessaloniki'],
+  ['portugal', 'Porto'],
+  ['thailand', 'Chiang Mai'],
+])
+
+function getLocationExample(scope = '') {
+  return LOCATION_EXAMPLES.get(String(scope).trim().toLowerCase()) || null
+}
+
+function getFollowUpPlaceholder(followUp) {
+  const field = String(followUp?.key || followUp?.field || '')
+  if (/traveler/i.test(field)) return 'For example, just me…'
+  if (/destination|city|airport|location/i.test(field)) {
+    const example = getLocationExample(followUp?.scope)
+    return example ? `For example, ${example}…` : `For example, name a city in ${followUp?.scope || 'that area'}…`
+  }
+  if (/timing|date/i.test(field)) return 'For example, October 8…'
+  if (/cabin/i.test(field)) return 'For example, premium economy…'
+  return 'For example, flexible dates…'
+}
+
+function getAdjustmentPlaceholder(brief, issues) {
+  const legs = brief?.flightLegs || []
+  const unresolvedLeg = legs.find((leg) => (
+    leg.pending || leg.originKind === 'broad_location' || leg.destinationKind === 'broad_location'
+  ))
+  if (issues.some((issue) => issue.type === 'city') && unresolvedLeg) {
+    const scope = unresolvedLeg.originKind === 'broad_location' ? unresolvedLeg.origin : unresolvedLeg.destination
+    const example = getLocationExample(scope)
+    return example ? `For example, change ${scope} to ${example}…` : `For example, specify a city in ${scope}…`
+  }
+  if (issues.some((issue) => issue.type === 'timing')) return 'For example, move the return flight a day later…'
+
+  const home = legs[0]?.origin
+  const lastStop = [...legs]
+    .reverse()
+    .map((leg) => leg.destination)
+    .find((destination) => destination && destination !== home)
+  if (lastStop) return `For example, stay two more nights in ${lastStop}…`
+  return 'For example, change the cabin to business class…'
+}
 
 const formatNumber = (value) => new Intl.NumberFormat('en-US').format(value)
 let googleIdentityScriptPromise = null
@@ -251,14 +222,22 @@ function normalizeItineraryText(value) {
   return String(value)
     .trim()
     .replace(/\s+/g, ' ')
-    .replace(/,?\s*(?:plus or minus|\+\/?-)\s*one day/gi, ' · ±1 Day')
+    .replace(/,?\s*(?:plus or minus|\+\/?-)\s*one day/gi, ' · ±1 day')
     .replace(/\b(am|pm)\b/gi, (match) => match.toUpperCase())
-    .split(' ')
-    .map((word) => {
-      if (/^[A-Z]{2,}(?:\d+)?$/.test(word) || /^[±\d$]/.test(word)) return word
-      return word.replace(/^([^A-Za-z]*)([A-Za-z])/, (_, prefix, first) => `${prefix}${first.toUpperCase()}`)
-    })
-    .join(' ')
+    .replace(/\bArrive By\b/g, 'Arrive by')
+    .replace(/\bWithin Two-Week Trip\b/g, 'Within two-week trip')
+    .replace(/\bWithin Trip Window\b/g, 'Within trip window')
+    .replace(/\bNot Specified\b/g, 'Not specified')
+    .replace(/\bPremium Economy\b/g, 'Premium economy')
+    .replace(/\bBusiness Class\b/g, 'Business class')
+}
+
+function getSafeAdjustmentError(error) {
+  const message = String(error?.message || '')
+  if (/changed while|already applied|no longer exists/i.test(message)) {
+    return 'Your itinerary changed while I was working. Try that adjustment again.'
+  }
+  return 'I couldn’t apply that change. Try naming the flight leg and what you want to update.'
 }
 
 function Brand() {
@@ -278,7 +257,7 @@ function WordReveal({ children, className = '', speed = 55, instant = false, onC
       let punctuationPause = 0
       if (/[.][”"']?$/.test(word)) punctuationPause = speed * 3
       else if (/[!?][”"']?$/.test(word)) punctuationPause = speed * 1.5
-      else if (/[:][”"']?$/.test(word)) punctuationPause = speed * 0.7
+      else if (/[:][”"']?$/.test(word)) punctuationPause = speed * 1.1
       else if (/[—–][”"']?$/.test(word)) punctuationPause = speed * 0.8
       else if (/[,][”"']?$/.test(word)) punctuationPause = speed * 1.1
       else if (/[;][”"']?$/.test(word)) punctuationPause = speed * 0.55
@@ -313,9 +292,11 @@ function App() {
   const [optimizationFinishing, setOptimizationFinishing] = useState(false)
   const [optimizationReady, setOptimizationReady] = useState(false)
   const [optimizationGlobeComplete, setOptimizationGlobeComplete] = useState(false)
+  const [recommendations, setRecommendations] = useState(() => DEV_RESULTS_MODE && DEV_BRIEF
+    ? systemServices.recommend({ brief: DEV_BRIEF })
+    : [])
   const [expandedResult, setExpandedResult] = useState(0)
   const [transitioning, setTransitioning] = useState(null)
-  const [rewardsReady, setRewardsReady] = useState(false)
   const [preliminaryLegCount, setPreliminaryLegCount] = useState(0)
   const [interpretationReady, setInterpretationReady] = useState(false)
   const [interpretationError, setInterpretationError] = useState('')
@@ -324,8 +305,9 @@ function App() {
   const [adjustmentCue, setAdjustmentCue] = useState('prompt')
   const [changedLegIds, setChangedLegIds] = useState([])
   const [adjustmentCopyComplete, setAdjustmentCopyComplete] = useState(false)
-  const [reviewCopyComplete, setReviewCopyComplete] = useState(false)
-  const [reviewLegCapacity, setReviewLegCapacity] = useState(Math.max(DEV_BRIEF?.flightLegs?.length || 0, 3))
+  const [hasAppliedAdjustment, setHasAppliedAdjustment] = useState(false)
+  const [rewardsCopyComplete, setRewardsCopyComplete] = useState(false)
+  const [rewardsTilesComplete, setRewardsTilesComplete] = useState(false)
   const [introCopyComplete, setIntroCopyComplete] = useState(DEV_STEP3_MODE || DEV_ADJUST_MODE || DEV_RESULTS_MODE || DEV_GLOBE_MODE)
   const [introExiting, setIntroExiting] = useState(false)
   const introTimers = useRef([])
@@ -431,7 +413,6 @@ function App() {
       if (followUp) {
         setPhase('followup')
       } else {
-        setReviewLegCapacity(Math.max(brief?.flightLegs?.length || 0, 3))
         setAdjustmentCue('prompt')
         setAdjustmentCopyComplete(false)
         setPhase('adjust')
@@ -446,6 +427,10 @@ function App() {
 
   useEffect(() => {
     if (phase !== 'optimizing') return undefined
+    setRecommendations(systemServices.recommend({
+      brief,
+      linkedProgramIds: linked,
+    }))
     setOptimizationStep(0)
     setOptimizationFinishing(false)
     setOptimizationReady(false)
@@ -454,7 +439,7 @@ function App() {
     const advanceOptimization = () => {
       optimizationTimer.current = window.setTimeout(() => {
         if (currentStep >= MOTION.optimizationStages.length - 1) {
-          setOptimizationStep(MOTION.optimizationStages.length)
+          setOptimizationStep(MOTION.optimizationStages.length - 1)
           setOptimizationReady(true)
           return
         }
@@ -473,7 +458,8 @@ function App() {
   }, [phase])
 
   useEffect(() => {
-    if (phase !== 'optimizing' || !optimizationReady || !optimizationGlobeComplete) return undefined
+    if (phase !== 'optimizing' || !optimizationReady || !optimizationGlobeComplete || !recommendations.length) return undefined
+    setOptimizationStep(MOTION.optimizationStages.length)
     setOptimizationFinishing(true)
     resultTimer.current = window.setTimeout(() => setPhase('results'), MOTION.optimizationExit)
     return () => {
@@ -482,12 +468,11 @@ function App() {
         resultTimer.current = null
       }
     }
-  }, [phase, optimizationGlobeComplete, optimizationReady])
+  }, [phase, optimizationGlobeComplete, optimizationReady, recommendations.length])
 
   const linkedPrograms = useMemo(() => programs.filter((program) => linked.includes(program.id)), [linked])
   const totalBalance = linkedPrograms.reduce((total, program) => total + program.balance, 0)
   const itineraryIssues = useMemo(() => validateItinerary(brief?.flightLegs || []), [brief])
-
   const submitTrip = () => {
     if (!draft.trim() || transitioning) return
     const submitted = draft.trim()
@@ -557,7 +542,6 @@ function App() {
           setPhase('followup')
         } else {
           setFollowUp(null)
-          setReviewLegCapacity(Math.max(updatedBrief.flightLegs?.length || 0, 3))
           setAdjustmentCue('prompt')
           setAdjustmentCopyComplete(false)
           setPhase('adjust')
@@ -578,11 +562,11 @@ function App() {
     if (transitioning || itineraryIssues.length) return
     setTransitioning('refinement-exit')
     scheduleTransition(() => {
+      setRewardsCopyComplete(false)
+      setRewardsTilesComplete(false)
       setPhase('rewards')
-      setRewardsReady(false)
       setAdjustmentCopyComplete(false)
       setTransitioning(null)
-      scheduleTransition(() => setRewardsReady(true), MOTION.rewardsReveal)
     }, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 20 : MOTION.copyExit)
   }
 
@@ -606,13 +590,14 @@ function App() {
             const result = applyItineraryOperations(brief, adjustment)
             setBrief(result.brief)
             setChangedLegIds(result.changedLegIds)
+            setHasAppliedAdjustment(true)
             setDraft('')
             setTransitioning(null)
             setAdjustmentCopyComplete(false)
             setAdjustmentCue('updated')
           } catch (error) {
             setTransitioning(null)
-            setAdjustmentError(error.message)
+            setAdjustmentError(getSafeAdjustmentError(error))
           }
         }, wait)
       })
@@ -657,9 +642,9 @@ function App() {
     setOptimizationFinishing(false)
     setOptimizationReady(false)
     setOptimizationGlobeComplete(false)
+    setRecommendations([])
     setExpandedResult(0)
     setTransitioning(null)
-    setRewardsReady(false)
     setPreliminaryLegCount(0)
     setInterpretationReady(false)
     setInterpretationError('')
@@ -668,32 +653,47 @@ function App() {
     setAdjustmentCue('prompt')
     setChangedLegIds([])
     setAdjustmentCopyComplete(false)
-    setReviewCopyComplete(false)
-    setReviewLegCapacity(3)
+    setHasAppliedAdjustment(false)
+    setRewardsCopyComplete(false)
+    setRewardsTilesComplete(false)
     setIntroCopyComplete(true)
     introCompleteRef.current = true
     setPhase('intake')
   }
 
   const isIntro = ['welcome', 'prompt', 'intake'].includes(phase)
-  const workspacePhase = ['building', 'followup', 'rewards', 'adjust', 'review'].includes(phase)
+  const workspacePhase = ['building', 'followup', 'rewards', 'adjust'].includes(phase)
   const requestedLegs = brief?.flightLegs || []
   const adjustmentBusy = transitioning === 'adjusting'
-  const reviewBlocked = itineraryIssues.length > 0
+  const itineraryBlocked = itineraryIssues.length > 0
   const primaryIssueType = itineraryIssues[0]?.type
-  const blockedReviewHeading = primaryIssueType === 'city'
-    ? 'One stop still needs a city.'
-    : primaryIssueType === 'timing'
-      ? 'One date falls out of sequence.'
-      : 'One connection needs a little more detail.'
   const blockedStatusLabel = primaryIssueType === 'city'
     ? 'City needed'
     : primaryIssueType === 'timing'
       ? 'Timing issue'
       : 'Continuity issue'
+  const summaryStatus = (() => {
+    if (phase === 'building') return { label: interpretationError ? 'Stopped' : 'Building', tone: 'building' }
+    if (phase === 'followup') {
+      if (transitioning === 'resolving') return { label: 'Updating', tone: 'building' }
+      if (transitioning === 'resolved') return { label: 'Updated', tone: 'complete', checked: true }
+      return { label: 'Collecting details', tone: 'building' }
+    }
+    if (adjustmentBusy) return { label: 'Updating', tone: 'building' }
+    if (phase === 'adjust' && itineraryBlocked) return { label: blockedStatusLabel, tone: 'warning', warning: true }
+    if (phase === 'adjust' && adjustmentCue === 'updated') return { label: 'Updated', tone: 'complete', checked: true }
+    if (phase === 'adjust') return { label: 'Review', tone: '' }
+    return { label: 'Ready', tone: 'complete', checked: true }
+  })()
 
   return (
-    <div className={`app app--${phase} ${transitioning ? `app--transition-${transitioning}` : ''}`}>
+    <div
+      className={`app app--${phase} ${transitioning ? `app--transition-${transitioning}` : ''}`}
+      data-testid="vetra-app"
+      data-phase={phase}
+      data-system-contract={SYSTEM_CONTRACT_VERSION}
+      data-recommendation-count={recommendations.length}
+    >
       <header className="app-header">
         <Brand />
         {!isIntro && phase !== 'results' && (
@@ -738,32 +738,28 @@ function App() {
       )}
 
       {workspacePhase && brief && (
-        <main className="journey-shell">
-          <section className={`journey-conversation ${['rewards', 'adjust', 'review'].includes(phase) ? 'journey-conversation--rewards' : ''}`}>
-            {phase === 'building' && (
-              <div className="step-label" key={`${phase}-label`}>
-                Building your trip
-              </div>
-            )}
-            {phase === 'adjust' && <div className="step-label">Final check</div>}
-            {phase === 'review' && <div className="step-label">{reviewBlocked ? 'Action needed' : 'Ready to search'}</div>}
-            <h1 className={`journey-question ${['rewards', 'adjust', 'review'].includes(phase) ? 'journey-question--rewards' : ''}`} key={`${phase}-${phase === 'adjust' ? adjustmentCue : ''}`}>
+        <main
+          className="journey-shell"
+          style={{ '--summary-height': `${136 + Math.max(requestedLegs.length, 3) * 100}px` }}
+        >
+          <section className={`journey-conversation ${['rewards', 'adjust'].includes(phase) ? 'journey-conversation--rewards' : ''}`}>
+            <h1 className={`journey-question ${['rewards', 'adjust'].includes(phase) ? 'journey-question--rewards' : ''}`} key={`${phase}-${phase === 'adjust' ? adjustmentCue : ''}`}>
               <WordReveal
                 speed={phase === 'building' ? 76 : phase === 'adjust' ? MOTION.adjustmentCopy : MOTION.questionWord}
-                onComplete={phase === 'adjust'
-                  ? () => {
-                    if (adjustmentCue === 'updated') {
-                      scheduleTransition(() => {
-                        setChangedLegIds([])
-                        setAdjustmentCue('prompt')
-                        setAdjustmentCopyComplete(false)
-                      }, MOTION.adjustmentUpdatedHold)
-                    } else {
-                      setAdjustmentCopyComplete(true)
+                onComplete={phase === 'rewards'
+                  ? () => setRewardsCopyComplete(true)
+                  : phase === 'adjust'
+                    ? () => {
+                      if (adjustmentCue === 'updated') {
+                        scheduleTransition(() => {
+                          setChangedLegIds([])
+                          setAdjustmentCue('prompt')
+                          setAdjustmentCopyComplete(false)
+                        }, MOTION.adjustmentUpdatedHold)
+                      } else {
+                        setAdjustmentCopyComplete(true)
+                      }
                     }
-                  }
-                  : phase === 'review'
-                    ? () => setReviewCopyComplete(true)
                     : undefined}
               >
                 {phase === 'building'
@@ -771,35 +767,14 @@ function App() {
                   : phase === 'followup'
                   ? followUp.question
                   : phase === 'rewards'
-                    ? 'One last step: let’s link.'
-                    : phase === 'adjust'
-                      ? adjustmentCue === 'updated'
-                        ? 'Itinerary updated.'
-                        : 'Any changes before I generate your personalized flight paths?'
-                      : reviewBlocked
-                        ? blockedReviewHeading
-                        : 'Your itinerary is ready.'}
+                    ? 'One last step: connect your airline and card rewards programs.'
+                    : adjustmentCue === 'updated'
+                      ? 'Itinerary updated.'
+                      : hasAppliedAdjustment
+                        ? 'Any more changes before I generate your personalized flight paths?'
+                        : 'Any changes before I generate your personalized flight paths?'}
               </WordReveal>
             </h1>
-            {phase === 'rewards' && (
-              <p className="rewards-subheader">Connect your airline and card rewards programs.</p>
-            )}
-            {phase === 'building' && (
-              <p className="journey-support" key={`${phase}-support`}>
-                {interpretationError
-                  ? 'No itinerary details were substituted or guessed.'
-                  : 'Mapping your route into complete flight legs'}
-              </p>
-            )}
-            {phase === 'adjust' && adjustmentCue === 'prompt' && (
-              <p className="rewards-subheader">Add or remove flight legs alongside editing the timing and cabin details of an existing one.</p>
-            )}
-            {phase === 'review' && (
-              <p className="rewards-subheader" id="itinerary-readiness-description">
-                {reviewBlocked ? itineraryIssues[0].message : 'I’ll compare cash and award options across every complete route.'}
-              </p>
-            )}
-
             {phase === 'building' || phase === 'followup' ? (
               <div className="journey-action-slot">
                 {phase === 'building' ? (
@@ -818,7 +793,7 @@ function App() {
                     value={draft}
                     onChange={setDraft}
                     onSubmit={submitFollowUp}
-                    placeholder={followUp.key === 'travelers' ? 'Just me' : 'Add the missing detail…'}
+                    placeholder={getFollowUpPlaceholder(followUp)}
                     autoFocus
                     focusDelay={740}
                     busy={transitioning === 'resolving' || transitioning === 'resolved'}
@@ -830,18 +805,24 @@ function App() {
               </div>
             ) : phase === 'rewards' ? (
               <div className="rewards-controls">
-                <div className="left-program-stage">
-                  {rewardsReady
-                    ? <ProgramPicker linked={linked} onToggle={toggleProgram} />
-                    : <div className="rewards-preparing"><span /> Preparing your programs…</div>}
-                </div>
-                {rewardsReady && (
-                  <button className="done-button" onClick={finishRewards} disabled={Boolean(transitioning)}>
-                    Done <ArrowRight size={17} />
-                  </button>
+                {rewardsCopyComplete && (
+                  <>
+                    <div className="left-program-stage">
+                      <ProgramPicker
+                        linked={linked}
+                        onToggle={toggleProgram}
+                        onRevealComplete={() => setRewardsTilesComplete(true)}
+                      />
+                    </div>
+                    {rewardsTilesComplete && (
+                      <button className="done-button" onClick={finishRewards} disabled={Boolean(transitioning)}>
+                        Done <ArrowRight size={17} />
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
-            ) : phase === 'adjust' ? (
+            ) : (
               <div className={`adjustment-controls ${adjustmentCopyComplete ? 'is-ready' : ''}`}>
                 {adjustmentCue === 'prompt' && adjustmentCopyComplete && (
                   <>
@@ -849,7 +830,7 @@ function App() {
                       value={draft}
                       onChange={setDraft}
                       onSubmit={submitAdjustment}
-                      placeholder="Add three nights in Kyoto, remove Honolulu, or fly home a day later…"
+                      placeholder={getAdjustmentPlaceholder(brief, itineraryIssues)}
                       ariaLabel="Itinerary changes"
                       autoFocus
                       focusDelay={140}
@@ -861,7 +842,7 @@ function App() {
                       <button
                         className="generate-button looks-good-button"
                         onClick={finishRefinement}
-                        disabled={reviewBlocked || Boolean(transitioning)}
+                        disabled={itineraryBlocked || Boolean(transitioning)}
                       >
                         Looks good <ArrowRight size={17} />
                       </button>
@@ -869,64 +850,18 @@ function App() {
                   </>
                 )}
               </div>
-            ) : (
-              <div className="review-action-slot">
-                {reviewCopyComplete && (
-                  <div className="review-controls">
-                    <button
-                      className="generate-button"
-                      onClick={beginOptimization}
-                      disabled={reviewBlocked || Boolean(transitioning)}
-                      aria-describedby="itinerary-readiness-description"
-                    >
-                      Generate personalized flight paths <ArrowRight size={17} />
-                    </button>
-                  </div>
-                )}
-              </div>
             )}
 
           </section>
 
-          <aside
-            className="journey-summary"
-            style={{
-              '--summary-height': `${173 + (['adjust', 'review'].includes(phase)
-                ? reviewLegCapacity
-                : Math.max(requestedLegs.length, 3)) * 100}px`,
-            }}
-          >
+          <aside className="journey-summary">
             <div className="summary-heading">
-              <div>
-                <span className="step-label">Itinerary</span>
-                <h2>{phase === 'building'
-                  ? 'Preliminary itinerary'
-                  : adjustmentCue === 'updated'
-                    ? 'Itinerary updated'
-                    : adjustmentBusy
-                    ? 'Review your itinerary'
-                    : phase === 'adjust'
-                      ? 'Review your itinerary'
-                      : phase === 'review' && reviewBlocked
-                        ? 'Check your itinerary'
-                        : phase === 'review'
-                          ? 'Ready to search'
-                  : transitioning === 'resolved'
-                    ? 'Itinerary updated'
-                    : phase === 'followup'
-                      ? 'Taking shape'
-                      : 'Ready to optimize'}</h2>
-              </div>
-              {phase !== 'followup' && <span role="status" aria-live="polite" className={`summary-status ${phase === 'building' || adjustmentBusy ? 'building' : ''} ${phase === 'rewards' || phase === 'adjust' || (phase === 'review' && !reviewBlocked) || transitioning === 'resolved' ? 'complete' : ''} ${phase === 'review' && reviewBlocked ? 'warning' : ''}`}>
-                {(phase === 'rewards' || phase === 'adjust' || (phase === 'review' && !reviewBlocked) || transitioning === 'resolved') && <Check size={12} />}
-                {phase === 'building'
-                  ? interpretationError ? 'Stopped' : 'Building'
-                  : adjustmentBusy
-                    ? 'Updating'
-                    : phase === 'review' && reviewBlocked
-                      ? <><CircleAlert size={12} /> {blockedStatusLabel}</>
-                      : 'Complete'}
-              </span>}
+              <span className="step-label">Itinerary</span>
+              <span role="status" aria-live="polite" className={`summary-status ${summaryStatus.tone}`}>
+                {summaryStatus.checked && <Check size={12} />}
+                {summaryStatus.warning && <CircleAlert size={12} />}
+                {summaryStatus.label}
+              </span>
             </div>
             <FlightLegRows
               legs={requestedLegs}
@@ -935,7 +870,7 @@ function App() {
               interpreting={!interpretationReady && !interpretationError}
               justResolved={transitioning === 'resolved'}
               changedLegIds={changedLegIds}
-              issues={['adjust', 'review'].includes(phase) ? itineraryIssues : []}
+              issues={phase === 'adjust' ? itineraryIssues : []}
             />
           </aside>
         </main>
@@ -945,6 +880,7 @@ function App() {
         <OptimizationView
           step={optimizationStep}
           linkedPrograms={linkedPrograms}
+          recommendations={recommendations}
           finishing={optimizationFinishing}
           brief={brief}
           onFlightComplete={handleOptimizationFlightComplete}
@@ -956,18 +892,17 @@ function App() {
           linkedPrograms={linkedPrograms}
           totalBalance={totalBalance}
           brief={brief}
+          recommendations={recommendations}
           expanded={expandedResult}
           onExpand={setExpandedResult}
           onReset={reset}
         />
       )}
-
-      <div className="prototype-note"><ShieldCheck size={12} /> Demo data · no bookings or transfers are made</div>
     </div>
   )
 }
 
-function TripComposer({ value, onChange, onSubmit, placeholder, hint, ariaLabel = 'Trip details', large = false, autoFocus = false, focusDelay = 620, busy = false, busyLabel = '' }) {
+function TripComposer({ value, onChange, onSubmit, placeholder, ariaLabel = 'Trip details', large = false, autoFocus = false, focusDelay = 620, busy = false, busyLabel = '' }) {
   const textareaRef = useRef(null)
   useEffect(() => {
     if (!autoFocus) return undefined
@@ -992,8 +927,8 @@ function TripComposer({ value, onChange, onSubmit, placeholder, hint, ariaLabel 
           }
         }}
       />
-      <div className={`composer-footer ${!busy && !hint ? 'composer-footer--actions-only' : ''}`}>
-        {(busy || hint) && <span>{busy ? busyLabel : hint}</span>}
+      <div className={`composer-footer ${!busy ? 'composer-footer--actions-only' : ''}`}>
+        {busy && <span>{busyLabel}</span>}
         <button onClick={onSubmit} disabled={!value.trim() || busy} aria-label={busy ? busyLabel : 'Continue'}>
           {busy ? <i className="composer-busy-dot" /> : <ArrowUp size={18} />}
         </button>
@@ -1017,7 +952,7 @@ function FlightLegRows({ legs, result = false, building = false, visibleCount = 
     >
       {result && (
         <div className="result-leg-columns" role="row">
-          <span role="columnheader" aria-label="Segment number" />
+          <span role="columnheader" aria-label="Flight leg number" />
           <span role="columnheader">Flight</span>
           <span role="columnheader">Departure</span>
           <span role="columnheader">Arrival</span>
@@ -1038,7 +973,7 @@ function FlightLegRows({ legs, result = false, building = false, visibleCount = 
       {!result && (
         <div className="flight-leg-columns" aria-hidden="true">
           <span />
-          <span>Flight Leg</span>
+          <span>Flight leg</span>
           <span>Departure</span>
           <span>Arrival</span>
           <span>Cabin</span>
@@ -1051,20 +986,24 @@ function FlightLegRows({ legs, result = false, building = false, visibleCount = 
           const hasChanged = changedLegIds.includes(leg.legId)
           const isArrivalDeadline = /arrive_by/i.test(leg.timingKind || '')
           const isTripWindow = /trip_window/i.test(leg.timingKind || '')
-          const departure = leg.departure || (isArrivalDeadline ? 'Flexible' : isTripWindow ? 'Within Trip Window' : leg.timing)
+          const departure = leg.departure || (isArrivalDeadline ? 'Flexible' : isTripWindow ? 'Within trip window' : leg.timing)
           const arrival = leg.arrival || (isTripWindow ? 'Flexible' : leg.timing)
+          const fundingProgram = leg.economics?.fundingProgram
+          const cashOnly = result && leg.economics?.fundingMode === 'cash'
           return (
           <div
             className={`flight-leg-row ${building ? 'flight-leg-row--building-ready' : ''} ${leg.pending ? 'pending' : ''} ${justResolved && leg.resolved ? 'flight-leg-row--just-resolved' : ''} ${hasChanged ? 'flight-leg-row--changed' : ''} ${hasIssue ? 'flight-leg-row--warning' : ''}`}
             key={leg.legId || `${leg.route}-${index}`}
             style={{ '--tile-delay': building ? '0ms' : `${index * (result ? 48 : 70)}ms`, ...(!result ? { gridRow: index + 1 } : {}) }}
             aria-label={hasIssue ? `${leg.route}. ${legIssues[0].message}` : undefined}
+            data-funding-program-id={result ? fundingProgram?.id || 'cash' : undefined}
+            data-pricing-source={result ? leg.economics?.source : undefined}
           >
             <span className="leg-number">
               {hasIssue ? <CircleAlert className="leg-warning-icon" size={14} aria-hidden="true" /> : String(index + 1).padStart(2, '0')}
             </span>
             <div className="leg-route">
-              {result && <span>{leg.detail}</span>}
+              {result && <span>{leg.detail}{fundingProgram ? ` · ${fundingProgram.name}` : ' · Cash fare'}</span>}
               <strong>{normalizeItineraryText(leg.route)}</strong>
             </div>
             <div className="leg-timing">
@@ -1076,9 +1015,12 @@ function FlightLegRows({ legs, result = false, building = false, visibleCount = 
             </div>
             {result && (
               <>
-                <div className="leg-cost"><strong>{formatNumber(leg.economics.points)} pts</strong><small>+ ${formatNumber(leg.economics.fees)}</small></div>
+                <div className="leg-cost">
+                  <strong>{cashOnly ? `$${formatNumber(leg.economics.cashValue)} cash` : `${formatNumber(leg.economics.points)} points`}</strong>
+                  <small>{cashOnly ? 'No program connected' : `${fundingProgram.name} · + $${formatNumber(leg.economics.fees)}`}</small>
+                </div>
                 <div className="leg-cash-value"><strong>${formatNumber(leg.economics.cashValue)}</strong></div>
-                <div className="leg-point-value"><strong>{leg.economics.pointValue.toFixed(1)}¢</strong><small>per point</small></div>
+                <div className="leg-point-value"><strong>{cashOnly ? '—' : `${leg.economics.pointValue.toFixed(1)}¢`}</strong><small>{cashOnly ? 'cash only' : 'per point'}</small></div>
               </>
             )}
           </div>
@@ -1092,7 +1034,7 @@ function FlightLegRows({ legs, result = false, building = false, visibleCount = 
           aria-hidden="true"
         >
           <i />
-          <span>{interpreting ? 'Preparing flight legs…' : visibleCount === 0 ? 'Identifying first leg…' : 'Identifying next leg…'}</span>
+          <span>{interpreting ? 'Preparing flight legs…' : visibleCount === 0 ? 'Identifying first flight leg…' : 'Identifying next flight leg…'}</span>
         </div>
       )}
       {building && (
@@ -1104,7 +1046,7 @@ function FlightLegRows({ legs, result = false, building = false, visibleCount = 
   )
 }
 
-function ProgramPicker({ linked, onToggle }) {
+function ProgramPicker({ linked, onToggle, onRevealComplete }) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [connectionProgram, setConnectionProgram] = useState(null)
   const [connectingId, setConnectingId] = useState(null)
@@ -1171,7 +1113,8 @@ function ProgramPicker({ linked, onToggle }) {
             ref={searchTileRef}
             className="program-tile program-tile--search"
             onClick={() => setSearchOpen(true)}
-            style={{ '--tile-delay': `${featuredPrograms.length * 45}ms` }}
+            onAnimationEnd={(event) => event.animationName === 'tileEnter' && onRevealComplete?.()}
+            style={{ '--tile-delay': `${Math.floor(featuredPrograms.length / 2) * PROGRAM_ROW_REVEAL_DELAY}ms` }}
             aria-label="Search for another rewards program"
           >
             <span className="program-logo program-logo--search">•••</span>
@@ -1180,7 +1123,7 @@ function ProgramPicker({ linked, onToggle }) {
           </button>
         </div>
         <span className="sr-only" role="status" aria-live="polite">
-          {linked.length ? `${linked.length} award program${linked.length === 1 ? '' : 's'} linked.` : ''}
+          {linked.length ? `${linked.length} rewards program${linked.length === 1 ? '' : 's'} connected.` : ''}
         </span>
       </div>
       {searchOpen && createPortal(
@@ -1212,10 +1155,10 @@ function ProgramTile({ program, index, linked, connecting, justLinked, onAction 
       className={`program-tile ${isLinked ? 'linked' : ''} ${connecting ? 'linking' : ''} ${justLinked ? 'just-linked' : ''}`}
       data-program-id={program.id}
       onClick={() => onAction(program)}
-      style={{ '--tile-delay': `${index * 45}ms` }}
+      style={{ '--tile-delay': `${Math.floor(index / 2) * PROGRAM_ROW_REVEAL_DELAY}ms` }}
       aria-pressed={isLinked}
       aria-busy={connecting}
-      aria-label={`${connecting ? 'Connecting' : isLinked ? 'Disconnect' : 'Connect'} ${program.name}${isLinked ? `, ${formatNumber(program.balance)} points linked` : ''}`}
+      aria-label={`${connecting ? 'Connecting' : isLinked ? 'Disconnect' : 'Connect'} ${program.name}${isLinked ? `, ${formatNumber(program.balance)}-point balance` : ''}`}
       disabled={connecting}
     >
       <span className="program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
@@ -1377,7 +1320,7 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
       >
         <header className="connection-modal-bar">
           <span><LockKeyhole size={12} /> Secure connection</span>
-          {phase === 'login' && <button onClick={onClose} aria-label={`Close ${program.name} sign in`}><X size={16} /></button>}
+          {phase === 'login' && <button onClick={onClose} aria-label={`Close ${program.name} sign-in`}><X size={16} /></button>}
         </header>
 
         {phase === 'login' && (
@@ -1419,7 +1362,7 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
                 </div>
               </label>
               {error && <p className="connection-error" role="alert"><CircleAlert size={13} /> {error}</p>}
-              <button className="connection-submit" type="submit">Sign In</button>
+              <button className="connection-submit" type="submit">Sign in</button>
             </form>
 
             <div className="connection-divider"><span>or</span></div>
@@ -1450,7 +1393,6 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
               <div><small>{program.program}</small><strong>{formatNumber(program.balance)} points</strong></div>
               <Check size={15} />
             </div>
-            <span className="connection-closing">Returning to your trip…</span>
           </div>
         )}
       </section>
@@ -1536,12 +1478,12 @@ function ProgramSearchModal({ linked, onProgramAction, onClose }) {
                 aria-pressed={isLinked}
               >
                 <span className="program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
-                <span className="program-copy"><strong>{program.name}</strong><small>{isLinked ? `${formatNumber(program.balance)} points linked` : program.program}</small></span>
+                <span className="program-copy"><strong>{program.name}</strong><small>{isLinked ? `${formatNumber(program.balance)}-point balance connected` : program.program}</small></span>
                 <span className="program-action">{isLinked ? <Check size={14} /> : '+'}</span>
               </button>
             )
           })}
-          {!filteredPrograms.length && <div className="program-search-empty">No matching program in this demo set.</div>}
+          {!filteredPrograms.length && <div className="program-search-empty">No matching rewards program found.</div>}
           {visiblePrograms.length > 0 && (
             <div className="program-search-progress" role="status" aria-live="polite">
               {visiblePrograms.length < filteredPrograms.length
@@ -1555,8 +1497,12 @@ function ProgramSearchModal({ linked, onProgramAction, onClose }) {
   )
 }
 
-function OptimizationView({ step, linkedPrograms, finishing, brief, onFlightComplete }) {
-  const stages = getOptimizationStages(linkedPrograms.length)
+function OptimizationView({ step, linkedPrograms, recommendations, finishing, brief, onFlightComplete }) {
+  const stages = getOptimizationStages({
+    linkedProgramCount: linkedPrograms.length,
+    legCount: brief?.flightLegs?.length || 0,
+    candidateCount: recommendations.length,
+  })
   return (
     <main className={`optimization-view ${finishing ? 'optimization-view--finishing' : ''}`}>
       <Suspense fallback={<div className="flight-globe flight-globe--loading" aria-label="Preparing animated route" />}>
@@ -1578,14 +1524,13 @@ function OptimizationView({ step, linkedPrograms, finishing, brief, onFlightComp
   )
 }
 
-function ResultsView({ linkedPrograms, totalBalance, brief, expanded, onExpand, onReset }) {
-  const recommendations = useMemo(() => buildDemoRecommendations(brief), [brief])
+function ResultsView({ linkedPrograms, totalBalance, brief, recommendations, expanded, onExpand, onReset }) {
   return (
     <main className="results-view">
       <section className="results-heading">
         <span className="step-label"><Sparkles size={13} /> Optimization complete</span>
         <h1>Three strong ways to make this trip work.</h1>
-        <p>{linkedPrograms.length ? `${formatNumber(totalBalance)} linked points were considered.` : 'No balances were linked, so point funding is illustrative.'}</p>
+        <p>{linkedPrograms.length ? `${formatNumber(totalBalance)} points across connected rewards programs were considered.` : 'No rewards programs were connected, so cash fares are shown.'}</p>
       </section>
       <section className="results-itinerary-handoff" aria-labelledby="finalized-itinerary-title">
         <header>
@@ -1603,7 +1548,13 @@ function ResultsView({ linkedPrograms, totalBalance, brief, expanded, onExpand, 
       </section>
       <section className="result-list">
         {recommendations.map((result, index) => (
-          <article className={`result-card ${expanded === index ? 'expanded' : ''}`} key={result.title} style={{ '--result-color': result.color, '--tile-delay': `${index * 90}ms` }}>
+          <article
+            className={`result-card ${expanded === index ? 'expanded' : ''}`}
+            data-funding-mode={result.economics.fundingMode}
+            data-program-ids={result.fundingPrograms.map((program) => program.id).join(',') || 'cash'}
+            key={result.title}
+            style={{ '--result-color': result.color, '--tile-delay': `${index * 90}ms` }}
+          >
             <button className="result-summary" data-testid={`result-summary-${index + 1}`} onClick={() => onExpand(expanded === index ? -1 : index)} aria-expanded={expanded === index}>
               <span className="result-rank">0{index + 1}</span>
               <span className="result-title"><small>{result.label}</small><strong>{result.title}</strong></span>
@@ -1616,15 +1567,14 @@ function ResultsView({ linkedPrograms, totalBalance, brief, expanded, onExpand, 
               <div className="result-detail-clip" inert={expanded !== index}>
                 <div className="result-detail">
                   <section className="result-flight-plan">
-                    <div className="detail-heading"><span>Flight Plan</span><strong>{result.segments.length} Bookable Segments</strong></div>
                     <FlightLegRows legs={result.segments} result />
                   </section>
                   <aside className="result-rationale">
-                    <div className="detail-heading"><span>Pros &amp; Cons</span><strong>Why This Ranks #{index + 1}</strong></div>
+                    <div className="detail-heading"><strong>Rationale</strong></div>
                     <p className="result-rationale-summary">{result.detail}</p>
                     <div className="tradeoff-groups">
                       <section className="tradeoff-group tradeoff-group--pros">
-                        <h3><Check size={12} /> {result.pros.length} Pros</h3>
+                        <h3><Check size={12} /> {result.pros.length} {result.pros.length === 1 ? 'Pro' : 'Pros'}</h3>
                         <ul>
                           {result.pros.map((pro) => <li key={pro}>{pro}</li>)}
                         </ul>

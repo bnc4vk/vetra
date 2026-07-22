@@ -39,8 +39,8 @@ const intent = ParsedTripIntent.parse({
     leg(2, 'Tokyo', 'South Korea', undefined, 'needed'),
   ],
   followUpQuestions: [
-    { field: 'destination', scope: 'Vietnam', priority: 2, question: 'Which city in Vietnam would you like to visit?' },
-    { field: 'destination', scope: 'South Korea', priority: 1, question: 'Which city in South Korea would you like to visit?' },
+    { field: 'destination', scope: 'Vietnam', priority: 2, question: 'Which city in Vietnam would you like to fly to?' },
+    { field: 'destination', scope: 'South Korea', priority: 1, question: 'Which city in South Korea would you like to fly to?' },
   ],
 })
 
@@ -106,7 +106,7 @@ const nonAdjacentBadTiming = applyItineraryOperations(fullyResolved, {
   operations: [{ operationId: 'earlier-third-leg', type: 'update', targetLegIds: [fullyResolved.flightLegs[2].legId], anchorLegId: null, position: null, field: 'timing', value: 'Nov 10', valueKind: 'timing', legs: [] }],
 }).brief
 assert.equal(validateItinerary(nonAdjacentBadTiming.flightLegs).filter((issue) => issue.type === 'timing').length, 1)
-assert.match(validateItinerary(nonAdjacentBadTiming.flightLegs).find((issue) => issue.type === 'timing').message, /Leg 3 is dated before leg 1/)
+assert.match(validateItinerary(nonAdjacentBadTiming.flightLegs).find((issue) => issue.type === 'timing').message, /Flight leg 3 is dated before flight leg 1/)
 
 const firstLegId = inserted.flightLegs[0].legId
 const cityGapAllowed = applyItineraryOperations(inserted, {

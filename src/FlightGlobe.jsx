@@ -3,11 +3,12 @@ import * as THREE from 'three'
 import { geoEquirectangular, geoPath } from 'd3-geo'
 import { feature } from 'topojson-client'
 import worldAtlas from 'world-atlas/countries-110m.json'
-import landAtlas from 'world-atlas/land-110m.json'
 import { normalizeLocationName, resolveRouteLocations } from './locationCatalog.js'
 
 const EARTH_RADIUS = 1.56
 const MIN_TRAVERSAL_MS = 9600
+const AMBIENT_PLANE_SPEED = .8
+const AMBIENT_GLOBE_ROTATION_SPEED = .105 * 1.3
 const CENTER = new THREE.Vector3(0, 0, 0)
 const CAMERA_DIRECTION = new THREE.Vector3(-0.12, 0.05, 1).normalize()
 
@@ -78,7 +79,7 @@ function drawGeoTexture() {
   context.fillRect(0, 0, canvas.width, canvas.height)
 
   const countries = feature(worldAtlas, worldAtlas.objects.countries)
-  const land = feature(landAtlas, landAtlas.objects.land)
+  const land = feature(worldAtlas, worldAtlas.objects.land)
   const projection = geoEquirectangular()
     .translate([canvas.width / 2, canvas.height / 2])
     .scale(canvas.width / (Math.PI * 2))
@@ -349,7 +350,8 @@ export default function FlightGlobe({ brief, onFirstTraversalComplete }) {
     const planeGlow = new THREE.PointLight(0xf26a3d, 1.1, .48, 2)
     plane.add(planeGlow)
 
-    const traversalMs = Math.max(MIN_TRAVERSAL_MS, segments.length * 2400)
+    const baseTraversalMs = Math.max(MIN_TRAVERSAL_MS, segments.length * 2400)
+    const traversalMs = route.mode === 'ambient' ? baseTraversalMs / AMBIENT_PLANE_SPEED : baseTraversalMs
     const desiredRotation = new THREE.Quaternion()
     const tangent = new THREE.Vector3()
     const planeDirection = new THREE.Vector3()
@@ -359,7 +361,8 @@ export default function FlightGlobe({ brief, onFirstTraversalComplete }) {
     const planeOrientation = new THREE.Matrix4()
     const worldMarkerDirection = new THREE.Vector3()
     const cameraPositionDirection = camera.position.clone().normalize()
-    const clock = new THREE.Clock()
+    const timer = new THREE.Timer()
+    timer.connect(document)
     let elapsedMs = 0
     let notified = false
     let animationFrame = null
@@ -375,8 +378,9 @@ export default function FlightGlobe({ brief, onFirstTraversalComplete }) {
     observer.observe(mount)
     resize()
 
-    const animate = () => {
-      const delta = Math.min(clock.getDelta(), .05)
+    const animate = (timestamp) => {
+      timer.update(timestamp)
+      const delta = Math.min(timer.getDelta(), .05)
       elapsedMs += delta * 1000
       const progress = (elapsedMs % traversalMs) / traversalMs
       const segment = segments.find((candidate) => progress <= candidate.end) || segments.at(-1)
@@ -393,7 +397,7 @@ export default function FlightGlobe({ brief, onFirstTraversalComplete }) {
       planeOrientation.makeBasis(planeRight, planeForward, planeOutward)
       plane.quaternion.setFromRotationMatrix(planeOrientation)
       if (route.mode === 'ambient') {
-        globeGroup.rotation.y += delta * .105
+        globeGroup.rotation.y += delta * AMBIENT_GLOBE_ROTATION_SPEED
       } else {
         planeDirection.copy(position).normalize()
         desiredRotation.setFromUnitVectors(planeDirection, CAMERA_DIRECTION)
@@ -421,6 +425,7 @@ export default function FlightGlobe({ brief, onFirstTraversalComplete }) {
     return () => {
       observer.disconnect()
       if (animationFrame) window.cancelAnimationFrame(animationFrame)
+      timer.dispose()
       disposeObject(globeGroup)
       earthTexture.dispose()
       renderer.dispose()

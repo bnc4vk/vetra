@@ -1,156 +1,53 @@
-# Vetra QA evidence
+# Vetra QA contract
 
-Last updated: 2026-07-18 (UTC)
+Last updated: 2026-07-22
 
-## Billing-safety contract
+The user-visible acceptance contract and integration boundaries live in [docs/SYSTEM_CONTRACT.md](docs/SYSTEM_CONTRACT.md). Historical acceptance notes are available in git history; this file describes only repeatable checks that match the current application.
 
-- Requested model is pinned to `gpt-5.4-2026-03-05`; `OPENAI_MODEL` cannot override it.
-- The OpenAI client requires an explicit project ID and sends it with every request so traffic
-  cannot silently fall into a different project.
-- A credential without `OPENAI_COMPLIMENTARY_TOKENS_CONFIRMED=true` returns HTTP 412
-  before the OpenAI client is called.
-- Missing project credentials or project ID return HTTP 503 before the OpenAI client is called.
-- The configured daily threshold is reduced to a 90% ceiling. A conservative request
-  reservation is rejected locally with HTTP 429 if it could cross that ceiling.
-- Actual response usage is persisted by UTC date. If usage metadata is absent, the full
-  conservative reservation is recorded instead.
-- The dashboard baseline must be refreshed at the beginning of each test session to account
-  for eligible-model usage outside Vetra.
+## Automated checks
 
-Automated proof:
+Run:
 
 ```sh
+npm run build
+npm run test:contract
+npm run test:itinerary
+npm run test:results
+npm run test:globe
 npm run test:safety
 ```
 
-This suite uses dummy credentials and exercises only local refusal paths. It never sends an
-OpenAI request.
+These cover the versioned system composition seam, typed itinerary mutation, candidate filtering/ranking, airport resolution and ambient fallback, and fail-closed complimentary-token protections.
 
-## In-app browser acceptance pass
+## In-app-browser acceptance
 
-Executed with real DOM-backed clicks and keyboard input against `http://localhost:5173`:
+Start the deterministic local server:
 
-- Custom Chicago–London brief submitted with `Control+Enter`: safely blocked after GPT
-  unavailability; no Tokyo constraints or results were substituted.
-- First-time demo data reset: wallet returned to zero linked programs.
-- Canonical multi-city brief submitted with `Control+Enter`: matching scripted fallback
-  loaded while GPT remained intentionally locked.
-- Constraint confirmation: working Edit and Confirm controls; inert tile affordances removed.
-- Connection modal: explicit simulation language, no credential fields, Escape dismissal.
-- Required wallet: Amex, Chase, and Aeroplan individually connected through the simulated
-  authorization UI; unrelated three-program combinations cannot continue.
-- Review: displayed wallet sum equals 342,800 + 186,400 + 41,250 = 570,450.
-- Optimization: transitioned through the simulated analysis stages to three ranked options.
-- Results: persistent prototype disclosure, year/local-time context, airport changes,
-  segment-level booking currencies, funding plans, and value formulas all visible.
-- Assumptions: modal opened from option one and disclosed score weights, value formula,
-  transfer assumptions, cash-comparator scope, and confidence meaning; Escape dismissal worked.
-- Browser console: no warnings or errors after the complete pass.
+```sh
+npm run test:browser:server
+```
 
-## Live GPT-5.4 acceptance pass
+Then import `scripts/in-app-browser-regression.mjs` in the Codex in-app-browser runtime and run `runInAppBrowserRegression({ browser: iab })`. The runner uses a real local tab and DOM-backed clicks, typing, and key presses; it does not use a standalone browser or synthetic component harness.
 
-Executed three times through the real Vetra UI with keyboard and click interaction against
-`http://localhost:5173`:
+A passing run completes five trips and validates:
 
-- OpenAI model: exact snapshot `gpt-5.4-2026-03-05`.
-- The canonical multi-city brief was interpreted into the correct five-city route and six
-  inspectable constraints; both the Tokyo arrival cutoff and required business-class outbound
-  were preserved as hard constraints.
-- The second run continued through the linked-balance review and reached the complete ranked
-  results experience without falling back to scripted parsing.
-- A non-canonical Chicago–London brief was correctly interpreted by GPT-5.4 and then stopped at
-  the prototype boundary with confirmation disabled; no Tokyo results were substituted.
-- Local usage ledger after all three calls: 2,035 tokens, with no pending reservations.
-- The first two calls reconciled in OpenAI Usage to 1,440 tokens: 884 input + 556 output.
-  The third call was still inside the dashboard's ingestion delay at the final refresh.
-- Both token categories are explicitly labeled `data sharing incentive tier` in the Platform
-  Usage dashboard.
-- The restricted `Vetra local demo` project key shows last used July 18, 2026 and monthly spend
-  of $0.00.
+1. Progressive welcome and planning cues, including pointer and keyboard acceleration.
+2. Trip entry, progressive leg construction, and required follow-up handling.
+3. The repeatable final-check loop for cabin/date changes and a retained stop insertion that produces a four-leg result.
+4. Zero, one, and multiple rewards selections; featured and searched programs; connection, disconnection, and reconnection.
+5. All four optimization stages, geographic globe routes, and fail-closed ambient fallback for an unknown code.
+6. Three ranked results, finalized-route handoff, an isolated non-zero quote for every confirmed leg, and only linked program IDs in award funding.
+7. Cash-only candidate and leg pricing when zero programs are linked, plus every expandable pros/cons rationale and restart to a cleared intake state.
+8. No browser console warnings or errors.
 
-## Hosted parity acceptance pass
+The fixture server is enabled only when `VETRA_BROWSER_TEST_MODE=true` in non-production. It rejects unknown briefs and adjustments, preventing accidental reliance on an unconstrained mock.
 
-Executed through the public Pages URL with real DOM-backed clicks and keyboard input:
+## Billing-safety contract
 
-- Public frontend at the time of this pass: `https://bnc4vk.github.io/vetra-pages/`.
-- Server-side API: `https://vetra-api-three.vercel.app`.
-- The canonical brief was submitted with `Control+Enter` and returned `6 constraints · GPT-5.4
-  interpreted`; no scripted-fallback response appeared.
-- The five-city route, 2026 dates, Tokyo arrival cutoff, and required business-class outbound were
-  all preserved.
-- Amex, Chase, and Aeroplan were connected through their simulated authorization modals; the
-  review showed the expected 570,450-point total.
-- Optimization reached all three ranked strategies, and option one expanded successfully.
-- The hosted request used 733 tokens. The Redis-backed hosted ledger reported 97,232 tokens
-  remaining under its conservative 100,000-token ceiling after accounting for the 2,035-token
-  pre-test organization baseline.
-- OpenAI Usage reconciled to 2,768 tokens total: 1,724 input + 1,044 output. Both categories are
-  explicitly grouped as `data sharing incentive tier`.
-- `Vetra hosted demo` is active, restricted, last used July 18, 2026, and shows $0.00 monthly
-  spend. `Vetra local demo` is likewise restricted and shows $0.00.
-- The originally exposed `My Test Key` is inactive and reduced to read-only permissions.
-- Browser console: no warnings or errors after the complete hosted pass.
+- The model snapshot is pinned; environment variables cannot silently select a different model.
+- A project ID and explicit complimentary-token confirmation are required before any OpenAI request.
+- Requests reserve a conservative allowance before dispatch and fail closed at the configured ceiling.
+- Actual usage is recorded by UTC date; missing usage metadata is charged at the full reservation.
+- Hosted traffic uses its separate Redis-backed ceiling and per-IP request allowance.
 
-Deployment evidence:
-
-- Public source repository: `bnc4vk/vetra`.
-- Former public artifact-only repository: `bnc4vk/vetra-pages` (superseded by native Pages in
-  `bnc4vk/vetra`).
-- Latest source workflow run for the hosted-quota commit: `29651965229` (successful).
-- Vercel production deployment: `dpl_4xUnzFQ7o93Xd4mp6dgmp11d9ZRV`, aliased to the stable API URL.
-- GitHub Pages reported its public artifact deployment as built.
-
-## Post-publication parity pass
-
-After changing `bnc4vk/vetra` from private to public, workflow run `29652376406` republished source
-commit `0895381` successfully. GitHub Pages reported the new artifact as built and the public URL
-returned HTTP 200.
-
-The complete public-site flow was then repeated with real DOM-backed keyboard and click interaction:
-
-- Reset the persisted wallet and restarted from a genuine zero-program first-time state.
-- Submitted the canonical brief with `Control+Enter`; GPT-5.4 returned the correct five-city route,
-  hard Tokyo arrival cutoff, business-class requirement, dates, and points-only optimization goal.
-- Confirmed the brief, connected Amex, Chase, and Aeroplan through all three simulated authorization
-  modals, and verified the 570,450-point wallet total.
-- Reached the review stage, ran optimization, expanded all three ranked strategies, and inspected the
-  assumptions, funding plans, value calculations, airport changes, and tradeoffs.
-- Submitted a non-canonical Chicago–London brief. GPT-5.4 correctly interpreted the roundtrip, 9:00 AM
-  arrival cutoff, business-class requirement, and return date; continuation was disabled and no Tokyo
-  result was substituted.
-- Browser console: no warnings or errors after the full deployed pass.
-- The three GPT calls in this pass added 2,132 tokens to the hosted ledger. Hosted usage now totals
-  2,865 tokens, leaving 95,100 tokens under the conservative ceiling after the 2,035-token baseline.
-
-## Arithmetic audit
-
-- Option 1 funding: 41,250 Aeroplan + 126,750 Amex = 168,000 points.
-  Value: `(6,840 - 312) / 168,000 × 100 = 3.89¢`.
-- Option 2 funding: 75,000 Amex + 70,000 Chase = 145,000 points.
-  Value: `(6,910 - 684) / 145,000 × 100 = 4.29¢`.
-- Option 3 funding: 180,000 Chase = 180,000 points, within the displayed 186,400 balance.
-  Value: `(6,770 - 149) / 180,000 × 100 = 3.68¢`.
-
-## Complimentary-token verification
-
-Verified in the authenticated Brahe Labs organization on 2026-07-18:
-
-- Usage Tier 1.
-- Eligible offer: 250,000 GPT-5.4-group tokens per UTC day.
-- Vetra safe ceiling: 225,000 tokens (10% / 25,000-token buffer).
-- Positive prepaid balance: $5.00; auto-recharge disabled.
-- Input/output sharing is enabled only for the Default project, and Platform confirms:
-  “You’re enrolled for complimentary daily tokens.”
-- A new persistent project key named `Vetra local demo` was created with restricted model-request
-  permissions and configured in ignored, mode-0600 `.env.local` without printing the secret.
-- Organization usage baseline was 0 before testing.
-- Three live requests used 2,035 tokens, or 0.90% of Vetra's 225,000-token safety ceiling, leaving
-  222,965 tokens within that ceiling.
-- Usage attribution and the key's $0.00 spend confirm that the reconciled tests used the complimentary
-  data-sharing tier and did not consume paid credits.
-- One additional public hosted request used 733 tokens, bringing the reconciled organization total
-  to 2,768 tokens. The Usage dashboard attributes all 2,768 tokens to the data-sharing incentive
-  tier, while both Vetra keys remain at $0.00 monthly spend.
-- The hosted service uses a separate 100,000-token ceiling (40% of the 250,000-token offer) with an
-  atomic shared ledger and leaves 150,000 tokens of organization-level headroom for activity outside
-  the hosted demo.
+`npm run test:safety` uses dummy credentials and local refusal paths only. It never sends an OpenAI request.

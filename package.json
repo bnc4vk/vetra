@@ -9,6 +9,8 @@
     "test:itinerary": "node scripts/itinerary-intent-smoke.mjs",
     "test:results": "node scripts/results-continuity-smoke.mjs",
     "test:globe": "node scripts/globe-location-smoke.mjs",
+    "test:contract": "node scripts/system-contract-smoke.mjs",
+    "test:browser:server": "VETRA_BROWSER_TEST_MODE=true node server.mjs",
     "generate:airports": "node scripts/generate-major-airports.mjs",
     "test:safety": "node scripts/safety-smoke.mjs",
     "test:hosted-safety": "node scripts/hosted-safety-smoke.mjs",

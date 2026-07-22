@@ -16,12 +16,18 @@ import {
   TRIP_INTERPRETATION_MODEL,
   TRIP_INTERPRETATION_PROMPT,
 } from './shared/trip-intelligence.mjs'
+import {
+  buildBrowserDemoAdjustment,
+  findBrowserDemoJourney,
+} from './shared/browser-demo-journeys.mjs'
 
 config({ path: '.env.local' })
 config()
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const port = Number(process.env.PORT || 5173)
+const browserTestMode = process.env.NODE_ENV !== 'production'
+  && process.env.VETRA_BROWSER_TEST_MODE === 'true'
 // Pin the exact snapshot included in OpenAI's complimentary-token program.
 // Do not replace this with a floating alias: eligibility is snapshot-specific.
 const model = TRIP_INTERPRETATION_MODEL
@@ -97,6 +103,7 @@ async function usageStatus() {
 app.get('/api/health', async (_request, response) => {
   response.json({
     ok: true,
+    browserTestMode,
     gptConfigured: Boolean(openai),
     projectConfigured: Boolean(projectId),
     complimentaryTokensConfirmed,
@@ -118,6 +125,17 @@ app.post('/api/parse-trip', async (request, response) => {
     return response.status(400).json({
       error: 'Please provide a flight brief between 1 and 5,000 characters.',
     })
+  }
+
+  if (browserTestMode) {
+    const journey = findBrowserDemoJourney(brief)
+    if (!journey) {
+      return response.status(404).json({
+        error: 'No deterministic browser fixture matches this trip brief.',
+        code: 'BROWSER_FIXTURE_NOT_FOUND',
+      })
+    }
+    return response.json(journey.intent)
   }
 
   if (!openai) {
@@ -229,6 +247,16 @@ app.post('/api/adjust-trip', async (request, response) => {
   if (!adjustmentRequest || adjustmentRequest.length > 5000 || !validItinerary) {
     return response.status(400).json({ error: 'Please provide a valid itinerary and adjustment request.' })
   }
+  if (browserTestMode) {
+    const adjustment = buildBrowserDemoAdjustment(adjustmentRequest, itinerary)
+    if (!adjustment) {
+      return response.status(404).json({
+        error: 'No deterministic browser fixture matches this itinerary adjustment.',
+        code: 'BROWSER_ADJUSTMENT_FIXTURE_NOT_FOUND',
+      })
+    }
+    return response.json(adjustment)
+  }
   if (!openai) {
     return response.status(503).json({ error: 'GPT requires a server-side project key and explicit project ID.', code: 'OPENAI_CONFIGURATION_MISSING' })
   }
@@ -286,7 +314,10 @@ if (process.env.NODE_ENV === 'production') {
 } else {
   const { createServer } = await import('vite')
   const vite = await createServer({
-    server: { middlewareMode: true },
+    server: {
+      middlewareMode: true,
+      hmr: browserTestMode ? { port: port + 19_000 } : undefined,
+    },
     appType: 'spa',
   })
   app.use(vite.middlewares)
@@ -294,8 +325,10 @@ if (process.env.NODE_ENV === 'production') {
 
 app.listen(port, '0.0.0.0', () => {
   console.log(`Vetra is running at http://localhost:${port}`)
-  const gptStatus = !openai
-    ? 'mock fallback only (project credential not configured)'
+  const gptStatus = browserTestMode
+    ? 'deterministic browser fixtures enabled'
+    : !openai
+      ? 'unavailable (project credential not configured)'
     : complimentaryTokensConfirmed
       ? `${model} enabled in complimentary-only mode`
       : 'locked (complimentary-token enrollment not confirmed)'

@@ -16,7 +16,19 @@ npm run build
 npm run test:safety
 ```
 
-The scripted demo remains available when GPT is locked or unavailable.
+Trip interpretation fails closed when GPT is locked or unavailable. Deterministic fixtures are available only through the local browser-regression command described below.
+
+The locked user journey, current demo boundaries, and replacement seams for rewards, award search, and itinerary reasoning are defined in [`docs/SYSTEM_CONTRACT.md`](docs/SYSTEM_CONTRACT.md).
+
+## Repeatable in-app-browser regression
+
+Start the deterministic local server:
+
+```sh
+npm run test:browser:server
+```
+
+Then run `scripts/in-app-browser-regression.mjs` through Codex's in-app Browser runtime. It performs five complete journeys with real clicks, typing, and keyboard submission. The fixture mode is local-only and is never enabled by the production start command.
 
 ## Complimentary-only GPT setup
 
