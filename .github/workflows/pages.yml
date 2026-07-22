@@ -35,6 +35,8 @@ jobs:
         run: npm run test:itinerary
       - name: Test result continuity
         run: npm run test:results
+      - name: Test globe location catalog
+        run: npm run test:globe
       - name: Test local billing safety
         run: npm run test:safety
       - name: Test hosted safety
@@ -78,13 +80,6 @@ jobs:
           echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
       - name: Wait for candidate deployment
         run: vercel inspect "${{ steps.deploy.outputs.url }}" --wait --timeout 3m --token="$VERCEL_TOKEN"
-      - name: Verify candidate API before promotion
-        env:
-          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
-          EXPECTED_DEPLOYMENT_SHA: ${{ github.sha }}
-        run: |
-          health_json="$(vercel curl "/api/health?revision=$GITHUB_SHA" --deployment "$DEPLOYMENT_URL" --token="$VERCEL_TOKEN" -- --silent --show-error)"
-          VETRA_API_HEALTH_JSON="$health_json" npm run test:hosted-contract
       - name: Promote verified API
         id: promote
         run: vercel promote "${{ steps.deploy.outputs.url }}" --yes --timeout 3m --token="$VERCEL_TOKEN"

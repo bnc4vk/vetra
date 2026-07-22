@@ -72,10 +72,11 @@ The deployable demo keeps frontend and secret-bearing backend separate:
 The source and Pages workflow now live in this single repository. Vercel deployment is
 managed by the same GitHub Actions release workflow as Pages. Direct pushes and merges to `main`
 remain available. Each update runs the production build and regression suites, uploads the candidate
-API without changing the production alias, verifies the candidate's readiness, exact Git revision,
-and API contract, then promotes it. Only after the verified API is live does the workflow deploy
-Pages and verify that the public site responds successfully. Production releases are serialized so
-two close updates cannot race each other.
+API without changing the production alias, and waits for Vercel to report a ready deployment before
+promoting it. The workflow then immediately checks the live alias for the exact Git revision, API
+contract, and GPT readiness. Only after that check passes does it deploy Pages and verify that the
+public site responds successfully. Production releases are serialized so two close updates cannot
+race each other.
 
 The release workflow requires repository variables `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, and
 `VETRA_API_BASE_URL`, plus a `VERCEL_TOKEN` repository secret. Prefer a project-scoped token whenever

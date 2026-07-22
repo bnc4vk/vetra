@@ -6,8 +6,7 @@ import {
 
 const apiBase = String(process.env.VETRA_API_BASE_URL || '').trim().replace(/\/$/, '')
 const expectedRevision = String(process.env.EXPECTED_DEPLOYMENT_SHA || '').trim()
-const providedHealthJson = String(process.env.VETRA_API_HEALTH_JSON || '').trim()
-assert(apiBase || providedHealthJson, 'VETRA_API_BASE_URL or VETRA_API_HEALTH_JSON is required.')
+assert(apiBase, 'VETRA_API_BASE_URL is required.')
 
 const expectedContracts = {
   tripIntent: TRIP_INTENT_VERSION,
@@ -15,16 +14,12 @@ const expectedContracts = {
 }
 
 const verifyHealth = async () => {
-  let health
-  if (providedHealthJson) {
-    health = JSON.parse(providedHealthJson)
-  } else {
-    const response = await fetch(`${apiBase}/api/health?revision=${encodeURIComponent(expectedRevision || 'contract-check')}`, {
-      headers: { accept: 'application/json', 'cache-control': 'no-cache' },
-    })
-    assert.equal(response.ok, true, `Hosted API health returned HTTP ${response.status}.`)
-    health = await response.json()
-  }
+  const response = await fetch(`${apiBase}/api/health?revision=${encodeURIComponent(expectedRevision || 'contract-check')}`, {
+    headers: { accept: 'application/json', 'cache-control': 'no-cache' },
+  })
+  assert.equal(response.ok, true, `Hosted API health returned HTTP ${response.status}.`)
+
+  const health = await response.json()
   assert.equal(health.ok, true)
   assert.equal(health.readyForGpt, true, 'Hosted API is not ready for GPT requests.')
   assert.deepEqual(health.contractVersions, expectedContracts)
@@ -38,15 +33,14 @@ const verifyHealth = async () => {
 }
 
 let lastError
-const maxAttempts = providedHealthJson ? 1 : 10
-for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+for (let attempt = 1; attempt <= 10; attempt += 1) {
   try {
     await verifyHealth()
     lastError = null
     break
   } catch (error) {
     lastError = error
-    if (attempt < maxAttempts) await new Promise((resolve) => setTimeout(resolve, 3_000))
+    if (attempt < 10) await new Promise((resolve) => setTimeout(resolve, 3_000))
   }
 }
 if (lastError) throw lastError
