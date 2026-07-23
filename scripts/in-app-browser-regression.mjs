@@ -72,12 +72,21 @@ async function waitForLocatorState(tab, locator, state, timeoutMs = PHASE_TIMEOU
 
 async function assertStep3TopAlignment(tab, phase) {
   await tab.playwright.waitForTimeout(phase === 'followup' ? 850 : 500)
-  const alignment = await tab.playwright.evaluate(() => {
+  const layout = await tab.playwright.evaluate(() => {
     const cue = document.querySelector('.journey-question')?.getBoundingClientRect()
+    const conversation = document.querySelector('.journey-conversation')?.getBoundingClientRect()
     const itinerary = document.querySelector('.journey-summary')?.getBoundingClientRect()
-    return Math.abs((cue?.top || 0) - (itinerary?.top || 0))
+    return {
+      mobile: window.matchMedia('(max-width: 767px)').matches,
+      topAlignment: Math.abs((cue?.top || 0) - (itinerary?.top || 0)),
+      stackedGap: (itinerary?.top || 0) - (conversation?.bottom || 0),
+    }
   })
-  assert(alignment <= 2, `${phase} cue and itinerary were misaligned by ${alignment}px.`)
+  if (layout.mobile) {
+    assert(layout.stackedGap >= 20 && layout.stackedGap <= 32, `${phase} mobile columns used a ${layout.stackedGap}px stacked gap.`)
+    return
+  }
+  assert(layout.topAlignment <= 2, `${phase} cue and itinerary were misaligned by ${layout.topAlignment}px.`)
 }
 
 async function validateIntro(tab) {
@@ -113,13 +122,16 @@ async function submitTripAndResolveFollowUps(tab, journey) {
   await typeAndPress(tab, tripInput, journey.brief)
   await waitForPhase(tab, 'building')
   await assertStep3TopAlignment(tab, 'building')
-  const heightMotion = await tab.playwright.evaluate(() => (
-    ['.journey-conversation', '.journey-summary'].map((selector) => {
+  const heightMotion = await tab.playwright.evaluate(() => ({
+    mobile: window.matchMedia('(max-width: 767px)').matches,
+    panels: ['.journey-conversation', '.journey-summary'].map((selector) => {
       const style = getComputedStyle(document.querySelector(selector))
       return { property: style.transitionProperty, duration: Number.parseFloat(style.transitionDuration) }
-    })
-  ))
-  assert(heightMotion.every((motion) => motion.property.includes('height') && motion.duration >= 0.8), 'Multi-leg workspace height changes were not smoothly synchronized.')
+    }),
+  }))
+  if (!heightMotion.mobile) {
+    assert(heightMotion.panels.every((motion) => motion.property.includes('height') && motion.duration >= 0.8), 'Multi-leg workspace height changes were not smoothly synchronized.')
+  }
   const buildingHeading = tab.playwright.getByText('I’m building a preliminary itinerary.', { exact: true })
   await one(tab, buildingHeading, 'Building phase heading')
   await one(tab, tab.playwright.getByText('Building', { exact: true }), 'Building status tile')

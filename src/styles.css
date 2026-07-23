@@ -479,6 +479,245 @@ button:focus-visible { outline: 3px solid rgba(242,84,45,.27); outline-offset: 2
   .optimization-list > div { min-height: 52px; }
 }
 
+@media (max-width: 767px) {
+  html, body, #root { width: 100%; }
+  body { min-width: 0; }
+  button, textarea, input { touch-action: manipulation; }
+  textarea, input { font-size: 16px !important; }
+
+  .app { min-height: 100dvh; overflow-x: hidden; overflow-y: visible; }
+  .app-header { height: 66px; padding: 0 max(20px, env(safe-area-inset-right)) 0 max(20px, env(safe-area-inset-left)); }
+  .brand-logo { height: 25px; }
+  .reset-button { min-height: 44px; margin-right: -8px; font-size: 11px; }
+
+  .intro { height: calc(100dvh - 66px); min-height: 570px; padding: 24px 0 max(40px, env(safe-area-inset-bottom)); }
+  .ambient-glow { width: 130vw; height: 56vh; }
+  .intro-content { width: calc(100vw - 40px); transform: translateY(-8px); }
+  .intro h1 { max-width: 560px; font-size: clamp(34px, 10.2vw, 46px); line-height: 1.08; letter-spacing: -2.2px; }
+  .intro--intake .intro-content { transform: translateY(-26px); }
+  .intro-composer-wrap { width: 100%; margin-top: 28px; }
+  .app--transition-capture .intro-content { transform: translate(-4vw, -26px) scale(.985); }
+  .composer { padding: 12px 11px 9px 14px; border-radius: 16px; }
+  .composer--large textarea { min-height: 94px; }
+  .composer-footer button { width: 44px; height: 44px; }
+
+  .journey-shell {
+    width: calc(100vw - 32px);
+    height: auto;
+    min-height: 0;
+    margin: 0 auto;
+    padding: 22px 0 max(42px, env(safe-area-inset-bottom));
+    grid-template-columns: minmax(0, 1fr);
+    gap: 26px;
+    align-items: start;
+  }
+  .journey-conversation,
+  .app--building .journey-conversation,
+  .app--followup .journey-conversation,
+  .app--adjust .journey-conversation {
+    height: auto;
+    min-height: 0;
+    justify-content: flex-start;
+    padding-top: 0;
+    transition: none;
+  }
+  .journey-conversation--rewards { padding-top: 0; }
+  .journey-question,
+  .app--building .journey-question,
+  .app--followup .journey-question,
+  .app--adjust .journey-question {
+    max-width: 600px;
+    margin: 0 0 16px;
+    font-size: clamp(31px, 9vw, 39px);
+    line-height: 1.08;
+    letter-spacing: -1.8px;
+    text-wrap: balance;
+  }
+  .journey-conversation .composer,
+  .followup-composer-wrap { max-width: none; }
+  .journey-action-slot { min-height: 122px; }
+  .adjustment-controls { min-height: 160px; }
+  .looks-good-button, .done-button { min-height: 48px; }
+  .done-button { min-width: 132px; }
+
+  .journey-summary {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    padding: 18px;
+    border-radius: 19px;
+    transition: none;
+  }
+  .summary-heading { height: auto; min-height: 43px; flex-basis: auto; padding: 0 0 13px; }
+  .flight-leg-list--fixed { display: block; padding-top: 0; }
+  .flight-leg-list--fixed .flight-leg-columns { display: none; }
+  .flight-leg-list--fixed .flight-leg-row,
+  .flight-leg-list--fixed .flight-leg-row:not(.pending) {
+    min-height: 0;
+    margin: 0;
+    padding: 16px 0;
+    grid-template-columns: 28px minmax(0, 1fr) minmax(86px, .7fr);
+    grid-template-areas:
+      "number route route"
+      ". departure arrival"
+      ". cabin cabin";
+    gap: 12px 10px;
+    border: 0;
+    border-bottom: 1px solid #e4e7e3;
+    border-radius: 0;
+  }
+  .flight-leg-list--fixed .flight-leg-row:last-child { border-bottom: 0; }
+  .flight-leg-list--fixed .flight-leg-row.pending,
+  .flight-leg-list--fixed .flight-leg-row.resolved,
+  .flight-leg-list--fixed .flight-leg-row--warning {
+    margin: 8px 0;
+    padding: 14px 12px;
+    border-radius: 13px !important;
+  }
+  .flight-leg-list--fixed .leg-number { grid-area: number; }
+  .flight-leg-list--fixed .leg-route { grid-area: route; }
+  .flight-leg-list--fixed .leg-timing { grid-area: departure; }
+  .flight-leg-list--fixed .leg-arrival { grid-area: arrival; }
+  .flight-leg-list--fixed .leg-cabin { grid-area: cabin; }
+  .flight-leg-list--fixed .leg-timing::before,
+  .flight-leg-list--fixed .leg-arrival::before,
+  .flight-leg-list--fixed .leg-cabin::before,
+  .flight-leg-list--result .leg-timing::before,
+  .flight-leg-list--result .leg-arrival::before,
+  .flight-leg-list--result .leg-cabin::before,
+  .flight-leg-list--result .leg-cost::before,
+  .flight-leg-list--result .leg-cash-value::before,
+  .flight-leg-list--result .leg-point-value::before {
+    display: block;
+    margin-bottom: 4px;
+    color: #939b99;
+    font-size: 8px;
+    font-weight: 500;
+    letter-spacing: .45px;
+    text-transform: uppercase;
+  }
+  .flight-leg-list--fixed .leg-timing::before,
+  .flight-leg-list--result .leg-timing::before { content: 'Departure'; }
+  .flight-leg-list--fixed .leg-arrival::before,
+  .flight-leg-list--result .leg-arrival::before { content: 'Arrival'; }
+  .flight-leg-list--fixed .leg-cabin::before,
+  .flight-leg-list--result .leg-cabin::before { content: 'Cabin'; }
+  .flight-leg-list--result .leg-cost::before { content: 'Award cost'; }
+  .flight-leg-list--result .leg-cash-value::before { content: 'Cash value'; }
+  .flight-leg-list--result .leg-point-value::before { content: 'Point value'; }
+  .flight-leg-list--fixed .leg-route strong { font-size: 15px; }
+  .flight-leg-list--fixed .leg-timing strong,
+  .flight-leg-list--fixed .leg-arrival strong,
+  .flight-leg-list--fixed .leg-cabin strong { font-size: 10px; }
+  .building-leg-loader { min-height: 90px; padding: 16px 4px; }
+
+  .left-program-stage { --program-stage-height: 434px; }
+  .program-grid { gap: 7px; }
+  .program-tile { height: 56px; padding: 7px; grid-template-columns: 30px minmax(0, 1fr) 22px; gap: 6px; }
+  .program-logo { width: 30px; height: 30px; }
+  .program-copy strong { font-size: 11px; }
+  .program-copy small { font-size: 9px; }
+
+  .program-modal-backdrop { padding: 12px; }
+  .program-modal { width: calc(100vw - 24px); height: calc(100dvh - 24px); padding: 18px; border-radius: 18px; }
+  .program-modal-heading > button,
+  .connection-modal-bar > button { width: 40px; height: 40px; }
+  .program-search-field { height: 56px; flex-basis: 56px; margin-top: 15px; }
+  .program-search-result { min-height: 60px; }
+  .connection-backdrop { align-items: end; padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+  .connection-modal { width: 100%; max-height: calc(100dvh - 24px); border-radius: 20px; }
+  .connection-modal-bar { height: 54px; padding-left: 18px; }
+  .connection-login { padding: 21px 20px 22px; }
+  .connection-modal h2 { font-size: 25px; }
+  .connection-form input, .connection-manual input { height: 46px; }
+  .connection-manual { grid-template-columns: minmax(0, 1fr) 100px; }
+  .connection-manual button { height: 46px; }
+  .provider-interstitial { min-height: min(500px, calc(100dvh - 78px)); }
+  .provider-login-card { width: calc(100% - 32px); margin: 20px auto 24px; padding: 24px 18px 22px; }
+  .connection-navigation-cue { min-height: min(455px, calc(100dvh - 78px)); padding: 30px 22px; }
+  .connection-progress, .connection-success { min-height: min(455px, calc(100dvh - 78px)); padding: 40px 24px 28px; }
+  .connection-bridge-track { width: 86px; margin-inline: 9px; }
+
+  .optimization-view {
+    width: calc(100vw - 40px);
+    height: auto;
+    min-height: calc(100dvh - 66px);
+    padding: 18px 0 max(38px, env(safe-area-inset-bottom));
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    align-content: center;
+  }
+  .flight-globe { width: 100%; min-height: 306px; justify-self: center; transform: none; }
+  .flight-globe::before { width: 300px; height: 300px; }
+  .flight-globe-stage { width: 304px; height: 304px; }
+  .flight-globe-shadow { bottom: 38px; width: 190px; height: 25px; }
+  .flight-globe figcaption { max-width: calc(100vw - 56px); margin-top: -7px; }
+  .optimization-copy { max-width: none; }
+  .optimization-copy h1 { margin: 9px 0 17px; font-size: 34px; line-height: 1.08; letter-spacing: -1.8px; }
+  .optimization-list > div { min-height: 55px; padding-inline: 13px; }
+
+  .results-view { width: calc(100vw - 32px); padding: 27px 0 max(52px, env(safe-area-inset-bottom)); }
+  .results-heading { margin-bottom: 27px; }
+  .results-heading h1 { margin-top: 10px; font-size: 35px; line-height: 1.07; letter-spacing: -2px; }
+  .results-heading p { font-size: 12px; }
+  .results-itinerary-handoff { margin: -6px 0 17px; padding: 17px; border-radius: 15px; }
+  .results-itinerary-handoff h2 { font-size: 16px; line-height: 1.3; }
+  .results-plan-legs { display: block; }
+  .results-plan-legs > div { padding: 13px 0; }
+  .results-plan-legs > div + div { padding-left: 0; border-top: 1px solid #e4e8e3; border-left: 0; }
+  .results-plan-legs > div:last-child { padding-bottom: 0; }
+  .results-plan-legs strong { white-space: normal; }
+  .result-list { gap: 10px; }
+  .result-card { border-radius: 15px; }
+  .result-summary {
+    min-height: 134px;
+    padding: 15px 14px;
+    grid-template-columns: 34px minmax(0, 1fr) 58px 14px;
+    grid-template-areas:
+      "rank title score chevron"
+      "rank total value chevron";
+    gap: 11px 10px;
+  }
+  .result-rank { grid-area: rank; font-size: 19px; }
+  .result-title { grid-area: title; }
+  .result-summary > .result-metric:nth-child(3) { grid-area: total; }
+  .result-summary > .result-metric:nth-child(4) { grid-area: value; }
+  .result-score { grid-area: score; }
+  .result-chevron { grid-area: chevron; }
+  .result-title small, .result-metric small { font-size: 9px; }
+  .result-title strong { font-size: 14px; }
+  .result-metric strong { font-size: 12px; }
+  .result-title em, .result-metric em { font-size: 9px; }
+  .result-score strong { width: 40px; height: 40px; }
+  .result-detail { padding: 17px 15px 18px; }
+  .result-leg-columns { display: none; }
+  .flight-leg-list--result .flight-leg-row {
+    min-height: 0;
+    padding: 16px 0;
+    grid-template-columns: 28px minmax(0, 1fr) minmax(96px, .75fr);
+    grid-template-areas:
+      "number route route"
+      ". departure arrival"
+      ". cabin cost"
+      ". cash point";
+    gap: 13px 10px;
+  }
+  .flight-leg-list--result .leg-number { grid-area: number; }
+  .flight-leg-list--result .leg-route { grid-area: route; }
+  .flight-leg-list--result .leg-timing { grid-area: departure; }
+  .flight-leg-list--result .leg-arrival { grid-area: arrival; }
+  .flight-leg-list--result .leg-cabin { grid-area: cabin; }
+  .flight-leg-list--result .leg-cost { grid-area: cost; }
+  .flight-leg-list--result .leg-cash-value { grid-area: cash; }
+  .flight-leg-list--result .leg-point-value { grid-area: point; }
+  .flight-leg-list--result .leg-route strong { font-size: 13px; }
+  .result-rationale { margin-top: 10px; padding-top: 16px; }
+  .tradeoff-groups { grid-template-columns: 1fr; gap: 0; }
+  .tradeoff-group + .tradeoff-group { padding-left: 0; border-top: 1px solid #e2e5e1; border-left: 0; }
+  .new-trip-button { width: 100%; min-height: 48px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0ms !important; transition-duration: .01ms !important; }
   .app--transition-resolved .journey-conversation, .app--rewards .journey-conversation,
