@@ -9,7 +9,7 @@ This document is the compatibility boundary for the current demo. Refactors and 
 1. **Welcome.** Progressive welcome copy, with no trip data requested. Pointer or keyboard input may accelerate the reveal; reduced-motion preferences may skip it.
 2. **Trip request.** Progressive planning cue followed by the trip composer. Submission enters itinerary interpretation.
 3. **Itinerary construction.** Flight legs are revealed progressively, unresolved required details are asked one at a time, and the user gets a repeatable final-check loop for route, date/timing, and cabin changes. “Looks good” is unavailable while the current itinerary validator reports a blocking issue.
-4. **Rewards selection.** Ordered featured programs, searchable additional programs, simulated connection/disconnection, and a zero-program path are all supported.
+4. **Rewards selection.** Twelve ordered program tiles are followed by AwardWallet and Missing program actions. Additional programs are searchable and promoted into an available displayed slot after linking. User-provided balance entry, simulated credential and Google connection flows (including a branded navigation cue), mocked balance plus tier/card-product details, an AwardWallet connector that syncs Amex, Citi, Alaska, JetBlue, and Southwest, disconnection, and a zero-program path are all supported. Settled tiles remain continuously visible through every connection-state transition, and search pagination exposes twenty more programs only after a one-second loading cue.
 5. **Optimization.** Four staged progress cues and an animated globe are shown without user input. Fully resolved locations use the geographic itinerary; any unresolved location fails closed to the ambient globe.
 6. **Results.** Three ranked demo itineraries expose totals, segment economics, carriers, times, cabin, point value, score, and expandable pros/cons. “Plan another trip” returns directly to the trip composer with transient trip and rewards state cleared.
 
@@ -41,7 +41,7 @@ Owns constraint filtering, funding feasibility, trade-off analysis, ranking, and
 
 ## Current demo boundaries
 
-- Rewards balances and connection success are simulated and held only in React state.
+- Rewards balances, account status/card-product details, AwardWallet sync, and connection success are simulated and held only in React state. Credentials are never persisted; user-provided balances are scoped to the current journey and remain visually distinct from provider-confirmed data.
 - Award candidates use modeled schedules and distance-aware placeholder economics; they are not live availability.
 - Linked program identity constrains candidate funding references, but placeholder balances do not yet alter feasibility or ranking.
 - GPT structures the initial brief and free-form adjustments; it does not search availability.

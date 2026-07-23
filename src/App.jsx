@@ -9,6 +9,7 @@ import {
   Eye,
   EyeOff,
   LockKeyhole,
+  Minus,
   RotateCcw,
   Search,
   Sparkles,
@@ -109,6 +110,8 @@ const DEV_BRIEF = DEV_ADJUST_MODE || DEV_RESULTS_MODE || DEV_GLOBE_MODE
 const GOOGLE_CLIENT_ID = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim()
 const PROGRAM_SEARCH_PAGE_SIZE = 20
 const PROGRAM_ROW_REVEAL_DELAY = 300
+const GOOGLE_NAVIGATION_CUE_MS = 3300
+const CONNECTION_PROGRESS_MS = 4400
 const MOTION = {
   welcomeWord: 232,
   promptWord: 192,
@@ -132,6 +135,54 @@ const MOTION = {
 }
 
 const programs = systemServices.rewards.programs
+const AWARDWALLET_PROGRAM_IDS = ['amex', 'citi', 'alaska', 'jetblue', 'southwest']
+const AWARDWALLET_CONNECTOR = {
+  id: 'awardwallet',
+  name: 'AwardWallet',
+  program: 'Rewards portfolio',
+  mark: 'AW',
+  balance: AWARDWALLET_PROGRAM_IDS.reduce((total, programId) => (
+    total + (programs.find((program) => program.id === programId)?.balance || 0)
+  ), 0),
+  color: '#17233d',
+  tint: '#eef1f5',
+  status: `${AWARDWALLET_PROGRAM_IDS.length} programs connected`,
+  isAggregator: true,
+}
+const PROGRAM_ACCOUNT_STATUSES = {
+  amex: 'Platinum Card',
+  chase: 'Sapphire Reserve',
+  capitalone: 'Venture X',
+  citi: 'Strata Premier',
+  bilt: 'Bilt Mastercard',
+  american: 'Platinum Pro',
+  united: 'Premier Gold',
+  delta: 'Diamond Medallion',
+  southwest: 'A-List Preferred',
+  aeroplan: 'Aeroplan 50K',
+  flyingblue: 'Flying Blue Gold',
+  alaska: 'MVP Gold 75K',
+  jetblue: 'Mosaic 2',
+  britishairways: 'Gold Tier',
+  virginatlantic: 'Flying Club Gold',
+  marriott: 'Platinum Elite',
+  hilton: 'Diamond',
+  hyatt: 'Explorist',
+  ihg: 'Platinum Elite',
+}
+const CARD_PROGRAM_IDS = new Set([
+  'amex', 'chase', 'capitalone', 'citi', 'bilt', 'wellsfargo', 'bankofamerica',
+  'usbank', 'barclays', 'brex', 'rbc', 'td', 'cibc', 'bmo', 'sceneplus',
+])
+const HOTEL_PROGRAM_IDS = new Set(['marriott', 'hilton', 'hyatt', 'ihg', 'wyndham', 'choice', 'accor', 'radisson'])
+
+function getMockAccountStatus(program) {
+  if (program.status) return program.status
+  if (PROGRAM_ACCOUNT_STATUSES[program.id]) return PROGRAM_ACCOUNT_STATUSES[program.id]
+  if (CARD_PROGRAM_IDS.has(program.id)) return 'Primary cardholder'
+  if (HOTEL_PROGRAM_IDS.has(program.id)) return 'Gold status'
+  return 'Gold status'
+}
 
 const getOptimizationStages = ({ linkedProgramCount, legCount, candidateCount }) => [
   { label: 'Mapping routes around your non-negotiables', meta: `${legCount} confirmed flight leg${legCount === 1 ? '' : 's'} carried forward` },
@@ -288,6 +339,17 @@ function App() {
   const [brief, setBrief] = useState(DEV_BRIEF)
   const [followUp, setFollowUp] = useState(null)
   const [linked, setLinked] = useState(DEV_ADJUST_MODE || DEV_GLOBE_MODE ? ['amex', 'chase', 'capitalone', 'citi'] : [])
+  const [linkedAccountDetails, setLinkedAccountDetails] = useState(() => (
+    DEV_ADJUST_MODE || DEV_GLOBE_MODE
+      ? Object.fromEntries(programs
+        .filter((program) => ['amex', 'chase', 'capitalone', 'citi'].includes(program.id))
+        .map((program) => [program.id, {
+          balance: program.balance,
+          status: getMockAccountStatus(program),
+          method: 'credentials',
+        }]))
+      : {}
+  ))
   const [optimizationStep, setOptimizationStep] = useState(0)
   const [optimizationFinishing, setOptimizationFinishing] = useState(false)
   const [optimizationReady, setOptimizationReady] = useState(false)
@@ -470,7 +532,9 @@ function App() {
     }
   }, [phase, optimizationGlobeComplete, optimizationReady, recommendations.length])
 
-  const linkedPrograms = useMemo(() => programs.filter((program) => linked.includes(program.id)), [linked])
+  const linkedPrograms = useMemo(() => programs
+    .filter((program) => linked.includes(program.id))
+    .map((program) => ({ ...program, ...(linkedAccountDetails[program.id] || {}) })), [linked, linkedAccountDetails])
   const totalBalance = linkedPrograms.reduce((total, program) => total + program.balance, 0)
   const itineraryIssues = useMemo(() => validateItinerary(brief?.flightLegs || []), [brief])
   const submitTrip = () => {
@@ -550,12 +614,55 @@ function App() {
     }, MOTION.followUpProcess)
   }
 
-  const toggleProgram = (programId) => {
+  const toggleProgram = (programId, accountDetails) => {
     if (linked.includes(programId)) {
       setLinked((current) => current.filter((id) => id !== programId))
+      setLinkedAccountDetails((current) => {
+        const next = { ...current }
+        delete next[programId]
+        return next
+      })
       return
     }
     setLinked((current) => current.includes(programId) ? current : [...current, programId])
+    const program = programs.find((entry) => entry.id === programId)
+    setLinkedAccountDetails((current) => ({
+      ...current,
+      [programId]: accountDetails || {
+        balance: program?.balance || 0,
+        status: program ? getMockAccountStatus(program) : null,
+        method: 'credentials',
+      },
+    }))
+  }
+
+  const connectAwardWalletPrograms = (programIds) => {
+    setLinked((current) => [...new Set([...current, ...programIds])])
+    setLinkedAccountDetails((current) => {
+      const next = { ...current }
+      programIds.forEach((programId) => {
+        if (next[programId]) return
+        const program = programs.find((entry) => entry.id === programId)
+        if (!program) return
+        next[programId] = {
+          balance: program.balance,
+          status: getMockAccountStatus(program),
+          method: 'awardwallet',
+        }
+      })
+      return next
+    })
+  }
+
+  const disconnectAwardWalletPrograms = (programIds) => {
+    setLinked((current) => current.filter((programId) => !programIds.includes(programId)))
+    setLinkedAccountDetails((current) => {
+      const next = { ...current }
+      programIds.forEach((programId) => {
+        if (next[programId]?.method === 'awardwallet') delete next[programId]
+      })
+      return next
+    })
   }
 
   const finishRefinement = () => {
@@ -638,6 +745,7 @@ function App() {
     setBrief(null)
     setFollowUp(null)
     setLinked([])
+    setLinkedAccountDetails({})
     setOptimizationStep(0)
     setOptimizationFinishing(false)
     setOptimizationReady(false)
@@ -810,7 +918,10 @@ function App() {
                     <div className="left-program-stage">
                       <ProgramPicker
                         linked={linked}
+                        linkedAccountDetails={linkedAccountDetails}
                         onToggle={toggleProgram}
+                        onAwardWalletConnect={connectAwardWalletPrograms}
+                        onAwardWalletDisconnect={disconnectAwardWalletPrograms}
                         onRevealComplete={() => setRewardsTilesComplete(true)}
                       />
                     </div>
@@ -1046,14 +1157,34 @@ function FlightLegRows({ legs, result = false, building = false, visibleCount = 
   )
 }
 
-function ProgramPicker({ linked, onToggle, onRevealComplete }) {
+function ProgramPicker({
+  linked,
+  linkedAccountDetails,
+  onToggle,
+  onAwardWalletConnect,
+  onAwardWalletDisconnect,
+  onRevealComplete,
+}) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [connectionProgram, setConnectionProgram] = useState(null)
   const [connectingId, setConnectingId] = useState(null)
-  const [justLinkedId, setJustLinkedId] = useState(null)
+  const [justLinkedIds, setJustLinkedIds] = useState([])
+  const [awardWalletAccount, setAwardWalletAccount] = useState(null)
+  const [awardWalletImportedIds, setAwardWalletImportedIds] = useState([])
+  const [displayedProgramIds, setDisplayedProgramIds] = useState(() => (
+    programs.filter((program) => program.featured).map((program) => program.id)
+  ))
+  const [tilesRevealed, setTilesRevealed] = useState(false)
   const searchTileRef = useRef(null)
   const linkedAnimationTimer = useRef(null)
-  const featuredPrograms = programs.filter((program) => program.featured)
+  const pendingAnimationIds = useRef([])
+  const linkedRef = useRef(linked)
+  const displayedProgramIdsRef = useRef(displayedProgramIds)
+  linkedRef.current = linked
+  displayedProgramIdsRef.current = displayedProgramIds
+  const displayedPrograms = displayedProgramIds
+    .map((programId) => programs.find((program) => program.id === programId))
+    .filter(Boolean)
   const closeSearch = useCallback(() => {
     setSearchOpen(false)
     window.setTimeout(() => searchTileRef.current?.focus(), 0)
@@ -1062,25 +1193,62 @@ function ProgramPicker({ linked, onToggle, onRevealComplete }) {
     window.setTimeout(() => document.querySelector(`[data-program-id="${programId}"]`)?.focus(), 0)
   }, [])
   const handleProgramAction = useCallback((program) => {
+    if (program.isAggregator && awardWalletAccount) {
+      onAwardWalletDisconnect(awardWalletImportedIds)
+      setAwardWalletAccount(null)
+      setAwardWalletImportedIds([])
+      return
+    }
     if (linked.includes(program.id)) {
       onToggle(program.id)
       return
     }
     setSearchOpen(false)
     setConnectionProgram(program)
-  }, [linked, onToggle])
+  }, [awardWalletAccount, awardWalletImportedIds, linked, onAwardWalletDisconnect, onToggle])
   const startConnection = useCallback((program) => {
     setConnectingId(program.id)
   }, [])
-  const completeConnection = useCallback((program) => {
-    onToggle(program.id)
+  const completeConnection = useCallback((program, accountDetails) => {
+    if (program.isAggregator) {
+      const importedIds = AWARDWALLET_PROGRAM_IDS.filter((programId) => !linkedRef.current.includes(programId))
+      const nextDisplayedIds = [...displayedProgramIdsRef.current]
+      AWARDWALLET_PROGRAM_IDS.forEach((programId) => {
+        if (nextDisplayedIds.includes(programId)) return
+        const replacementIndex = nextDisplayedIds.findLastIndex((displayedId) => (
+          !AWARDWALLET_PROGRAM_IDS.includes(displayedId) && !linkedRef.current.includes(displayedId)
+        ))
+        if (replacementIndex >= 0) nextDisplayedIds[replacementIndex] = programId
+      })
+      if (nextDisplayedIds.some((programId, index) => programId !== displayedProgramIdsRef.current[index])) {
+        displayedProgramIdsRef.current = nextDisplayedIds
+        setDisplayedProgramIds(nextDisplayedIds)
+      }
+      setAwardWalletImportedIds(importedIds)
+      setAwardWalletAccount({ ...accountDetails, programCount: AWARDWALLET_PROGRAM_IDS.length })
+      onAwardWalletConnect(AWARDWALLET_PROGRAM_IDS)
+      pendingAnimationIds.current = [program.id, ...importedIds]
+    } else {
+      onToggle(program.id, accountDetails)
+      pendingAnimationIds.current = [program.id]
+    }
     setConnectingId(null)
-    setJustLinkedId(program.id)
-    if (linkedAnimationTimer.current) window.clearTimeout(linkedAnimationTimer.current)
-    linkedAnimationTimer.current = window.setTimeout(() => setJustLinkedId(null), 1100)
-  }, [onToggle])
+  }, [onAwardWalletConnect, onToggle])
   const finishConnection = useCallback((program) => {
+    if (!program.isAggregator && !displayedProgramIdsRef.current.includes(program.id)) {
+      const currentIds = displayedProgramIdsRef.current
+      const replacementIndex = currentIds.findLastIndex((programId) => !linkedRef.current.includes(programId))
+      if (replacementIndex >= 0) {
+        const nextIds = [...currentIds]
+        nextIds[replacementIndex] = program.id
+        displayedProgramIdsRef.current = nextIds
+        setDisplayedProgramIds(nextIds)
+      }
+    }
     setConnectionProgram(null)
+    setJustLinkedIds(pendingAnimationIds.current)
+    if (linkedAnimationTimer.current) window.clearTimeout(linkedAnimationTimer.current)
+    linkedAnimationTimer.current = window.setTimeout(() => setJustLinkedIds([]), 1100)
     focusProgramTile(program.id)
   }, [focusProgramTile])
   const closeConnection = useCallback(() => {
@@ -1097,24 +1265,38 @@ function ProgramPicker({ linked, onToggle, onRevealComplete }) {
   return (
     <>
       <div className="program-picker">
-        <div className="program-grid">
-          {featuredPrograms.map((program, index) => (
+        <div className={`program-grid ${tilesRevealed ? 'program-grid--revealed' : ''}`}>
+          {displayedPrograms.map((program, index) => (
             <ProgramTile
               key={program.id}
               program={program}
               index={index}
               linked={linked}
+              accountDetails={linkedAccountDetails}
               connecting={connectingId === program.id}
-              justLinked={justLinkedId === program.id}
+              justLinked={justLinkedIds.includes(program.id)}
               onAction={handleProgramAction}
             />
           ))}
+          <ProgramTile
+            program={AWARDWALLET_CONNECTOR}
+            index={displayedPrograms.length}
+            linked={awardWalletAccount ? [AWARDWALLET_CONNECTOR.id] : []}
+            accountDetails={awardWalletAccount ? { [AWARDWALLET_CONNECTOR.id]: awardWalletAccount } : {}}
+            connecting={connectingId === AWARDWALLET_CONNECTOR.id}
+            justLinked={justLinkedIds.includes(AWARDWALLET_CONNECTOR.id)}
+            onAction={handleProgramAction}
+          />
           <button
             ref={searchTileRef}
             className="program-tile program-tile--search"
             onClick={() => setSearchOpen(true)}
-            onAnimationEnd={(event) => event.animationName === 'tileEnter' && onRevealComplete?.()}
-            style={{ '--tile-delay': `${Math.floor(featuredPrograms.length / 2) * PROGRAM_ROW_REVEAL_DELAY}ms` }}
+            onAnimationEnd={(event) => {
+              if (event.animationName !== 'tileEnter') return
+              setTilesRevealed(true)
+              onRevealComplete?.()
+            }}
+            style={{ '--tile-delay': `${Math.floor(displayedPrograms.length / 2) * PROGRAM_ROW_REVEAL_DELAY}ms` }}
             aria-label="Search for another rewards program"
           >
             <span className="program-logo program-logo--search">•••</span>
@@ -1124,11 +1306,14 @@ function ProgramPicker({ linked, onToggle, onRevealComplete }) {
         </div>
         <span className="sr-only" role="status" aria-live="polite">
           {linked.length ? `${linked.length} rewards program${linked.length === 1 ? '' : 's'} connected.` : ''}
+          {awardWalletAccount ? ' AwardWallet connected.' : ''}
         </span>
       </div>
       {searchOpen && createPortal(
         <ProgramSearchModal
           linked={linked}
+          linkedAccountDetails={linkedAccountDetails}
+          displayedProgramIds={displayedProgramIds}
           onProgramAction={handleProgramAction}
           onClose={closeSearch}
         />,
@@ -1148,22 +1333,31 @@ function ProgramPicker({ linked, onToggle, onRevealComplete }) {
   )
 }
 
-function ProgramTile({ program, index, linked, connecting, justLinked, onAction }) {
+function ProgramTile({ program, index, linked, accountDetails = {}, connecting, justLinked, onAction }) {
   const isLinked = linked.includes(program.id)
+  const account = accountDetails[program.id]
+  const isUserProvided = account?.method === 'manual'
+  const connectedSummary = program.isAggregator && account
+    ? `${account.programCount || AWARDWALLET_PROGRAM_IDS.length} programs connected`
+    : account
+      ? isUserProvided
+        ? `${formatNumber(account.balance)} pts · User-provided`
+        : `${formatNumber(account.balance)} points${account.status ? ` · ${account.status}` : ''}`
+      : `${formatNumber(program.balance)} points`
   return (
     <button
-      className={`program-tile ${isLinked ? 'linked' : ''} ${connecting ? 'linking' : ''} ${justLinked ? 'just-linked' : ''}`}
+      className={`program-tile ${isLinked ? 'linked' : ''} ${isUserProvided ? 'user-provided' : ''} ${connecting ? 'linking' : ''} ${justLinked ? 'just-linked' : ''}`}
       data-program-id={program.id}
       onClick={() => onAction(program)}
       style={{ '--tile-delay': `${Math.floor(index / 2) * PROGRAM_ROW_REVEAL_DELAY}ms` }}
       aria-pressed={isLinked}
       aria-busy={connecting}
-      aria-label={`${connecting ? 'Connecting' : isLinked ? 'Disconnect' : 'Connect'} ${program.name}${isLinked ? `, ${formatNumber(program.balance)}-point balance` : ''}`}
+      aria-label={`${connecting ? 'Connecting' : isLinked ? 'Disconnect' : 'Connect'} ${program.name}${isLinked ? `, ${connectedSummary}` : ''}`}
       disabled={connecting}
     >
       <span className="program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
-      <span className="program-copy"><strong>{program.name}</strong><small>{isLinked ? `${formatNumber(program.balance)} points` : program.program}</small></span>
-      <span className="program-action">{connecting ? <i /> : isLinked ? <Check size={14} /> : '+'}</span>
+      <span className="program-copy"><strong>{program.isAggregator && !isLinked ? 'Connect AwardWallet' : program.name}</strong><small>{isLinked ? connectedSummary : program.program}</small></span>
+      <span className="program-action">{connecting ? <i /> : isLinked ? isUserProvided ? <Minus size={14} /> : <Check size={14} /> : '+'}</span>
     </button>
   )
 }
@@ -1225,12 +1419,34 @@ function GoogleSignInButton({ onAuthenticated }) {
   )
 }
 
+function GoogleFlowButton({ onClick }) {
+  return (
+    <button className="google-signin-fallback google-signin-fallback--static" type="button" onClick={onClick}>
+      <svg aria-hidden="true" viewBox="0 0 18 18">
+        <path fill="#4285F4" d="M17.64 9.205c0-.638-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.797 2.715v2.258h2.909c1.702-1.567 2.684-3.874 2.684-6.613Z" />
+        <path fill="#34A853" d="M9 18c2.43 0 4.468-.806 5.956-2.182l-2.909-2.258c-.806.54-1.835.86-3.047.86-2.344 0-4.328-1.585-5.037-3.714H.956v2.332A8.998 8.998 0 0 0 9 18Z" />
+        <path fill="#FBBC05" d="M3.963 10.706A5.41 5.41 0 0 1 3.682 9c0-.592.102-1.168.281-1.706V4.962H.956A9 9 0 0 0 0 9c0 1.452.347 2.827.956 4.038l3.007-2.332Z" />
+        <path fill="#EA4335" d="M9 3.58c1.321 0 2.507.454 3.441 1.346l2.581-2.581C13.464.892 11.426 0 9 0A8.998 8.998 0 0 0 .956 4.962l3.007 2.332C4.672 5.165 6.656 3.58 9 3.58Z" />
+      </svg>
+      <span>Sign in with Google</span>
+    </button>
+  )
+}
+
+function getProgramLoginHost(program) {
+  const slug = program.name.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20)
+  return `secure.${slug || 'rewards'}.com`
+}
+
 function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFinished, onClose }) {
   const [phase, setPhase] = useState('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [manualBalance, setManualBalance] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const [manualError, setManualError] = useState('')
+  const [connectedAccount, setConnectedAccount] = useState(null)
   const dialogRef = useRef(null)
   const usernameRef = useRef(null)
   const passwordRef = useRef(null)
@@ -1244,15 +1460,23 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
     connectionTimers.current.push(timer)
   }
 
-  const beginConnection = useCallback(() => {
+  const beginConnection = useCallback((details = {}) => {
+    const accountDetails = {
+      balance: details.balance ?? program.balance,
+      status: details.method === 'manual' ? null : getMockAccountStatus(program),
+      method: details.method || 'credentials',
+      ...(program.isAggregator ? { programCount: AWARDWALLET_PROGRAM_IDS.length } : {}),
+    }
     setError('')
+    setManualError('')
+    setConnectedAccount(accountDetails)
     setPhase('connecting')
     onConnectionStart(program)
     queueConnectionTimer(() => {
       setPhase('success')
-      onConnected(program)
+      onConnected(program, accountDetails)
       queueConnectionTimer(() => onFinished(program), 2100)
-    }, 2200)
+    }, CONNECTION_PROGRESS_MS)
   }, [onConnected, onConnectionStart, onFinished, program])
 
   const submitCredentials = (event) => {
@@ -1267,7 +1491,28 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
       passwordRef.current?.focus()
       return
     }
-    beginConnection()
+    beginConnection({ method: 'credentials' })
+  }
+
+  const submitManualBalance = (event) => {
+    event.preventDefault()
+    const balance = Number(manualBalance.replace(/,/g, ''))
+    if (!Number.isSafeInteger(balance) || balance < 0) {
+      setManualError('Enter a whole-number balance of zero or greater.')
+      return
+    }
+    const accountDetails = { balance, status: null, method: 'manual' }
+    setError('')
+    setManualError('')
+    setConnectedAccount(accountDetails)
+    setPhase('success')
+    onConnected(program, accountDetails)
+    queueConnectionTimer(() => onFinished(program), 2100)
+  }
+
+  const beginGoogleNavigation = () => {
+    setPhase('navigating')
+    queueConnectionTimer(() => setPhase('provider'), GOOGLE_NAVIGATION_CUE_MS)
   }
 
   useEffect(() => {
@@ -1281,7 +1526,7 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
 
   useEffect(() => {
     const handleDialogKeys = (event) => {
-      if (event.key === 'Escape' && phase === 'login') {
+      if (event.key === 'Escape' && ['login', 'navigating', 'provider'].includes(phase)) {
         onClose()
         return
       }
@@ -1308,7 +1553,7 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
   }, [])
 
   return (
-    <div className="connection-backdrop" onMouseDown={(event) => event.target === event.currentTarget && phase === 'login' && onClose()}>
+    <div className="connection-backdrop" onMouseDown={(event) => event.target === event.currentTarget && ['login', 'navigating', 'provider'].includes(phase) && onClose()}>
       <section
         ref={dialogRef}
         className={`connection-modal connection-modal--${phase}`}
@@ -1320,7 +1565,7 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
       >
         <header className="connection-modal-bar">
           <span><LockKeyhole size={12} /> Secure connection</span>
-          {phase === 'login' && <button onClick={onClose} aria-label={`Close ${program.name} sign-in`}><X size={16} /></button>}
+          {['login', 'navigating', 'provider'].includes(phase) && <button onClick={onClose} aria-label={`Close ${program.name} sign-in`}><X size={16} /></button>}
         </header>
 
         {phase === 'login' && (
@@ -1330,7 +1575,9 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
               <span>Powered by <strong>{program.name}</strong></span>
             </div>
             <h2 id="connection-title">Sign in to {program.name}</h2>
-            <p id="connection-description">Connect {program.program} so Vetra can include your balance in this search.</p>
+            <p id="connection-description">{program.isAggregator
+              ? 'Bring your existing rewards portfolio into Vetra in one step.'
+              : `Connect ${program.program} so Vetra can include your balance in this search.`}</p>
 
             <form className="connection-form" onSubmit={submitCredentials} noValidate>
               <label>
@@ -1366,7 +1613,71 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
             </form>
 
             <div className="connection-divider"><span>or</span></div>
-            <GoogleSignInButton onAuthenticated={beginConnection} />
+            <div className="google-signin-slot">
+              <GoogleFlowButton onClick={beginGoogleNavigation} />
+            </div>
+
+            {!program.isAggregator && (
+              <>
+                <div className="connection-divider connection-divider--manual"><span>or add points manually</span></div>
+                <form className="connection-manual" onSubmit={submitManualBalance} noValidate>
+                  <label>
+                    <span className="sr-only">Current points balance</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={manualBalance}
+                      onChange={(event) => setManualBalance(event.target.value.replace(/[^0-9]/g, ''))}
+                      placeholder="Current points balance"
+                      aria-label="Current points balance"
+                      aria-invalid={Boolean(manualError)}
+                    />
+                  </label>
+                  <button type="submit">Use balance</button>
+                </form>
+                {manualError && <p className="connection-error connection-error--manual" role="alert"><CircleAlert size={13} /> {manualError}</p>}
+              </>
+            )}
+          </div>
+        )}
+
+        {phase === 'navigating' && (
+          <div className="connection-navigation-cue" aria-live="polite">
+            <div className="navigation-cue-window" aria-hidden="true">
+              <div className="provider-browser-bar">
+                <span /><span /><span />
+                <strong><LockKeyhole size={10} /> {getProgramLoginHost(program)}</strong>
+              </div>
+              <div className="navigation-cue-brand" style={{ '--provider-color': program.color, '--provider-tint': program.tint }}>
+                <span className="connection-program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
+                <i />
+              </div>
+            </div>
+            <span className="connection-eyebrow">Opening secure sign-in</span>
+            <h2 id="connection-title">Taking you to {program.name}</h2>
+            <p id="connection-description">Loading the {program.program} sign-in page…</p>
+            <span className="navigation-progress" aria-hidden="true"><i /></span>
+          </div>
+        )}
+
+        {phase === 'provider' && (
+          <div className="provider-interstitial">
+            <div className="provider-browser-bar" aria-label={`${program.name} secure rewards login`}>
+              <span /><span /><span />
+              <strong><LockKeyhole size={10} /> {getProgramLoginHost(program)}</strong>
+            </div>
+            <div className="provider-brand-strip" style={{ '--provider-color': program.color, '--provider-tint': program.tint }}>
+              <span className="connection-program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
+              <strong>{program.name}</strong>
+            </div>
+            <div className="provider-login-card">
+              <span className="connection-eyebrow">{program.program}</span>
+              <h2 id="connection-title">Welcome back</h2>
+              <p id="connection-description">Continue with Google to sign in securely to your {program.name} rewards account.</p>
+              <GoogleSignInButton onAuthenticated={() => beginConnection({ method: 'google' })} />
+              <small><LockKeyhole size={11} /> You’ll return to Vetra after signing in.</small>
+            </div>
           </div>
         )}
 
@@ -1383,15 +1694,30 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
         )}
 
         {phase === 'success' && (
-          <div className="connection-success" aria-live="polite">
-            <span className="connection-success-mark"><CheckCircle2 size={33} /></span>
-            <span className="connection-eyebrow">Connection complete</span>
-            <h2 id="connection-title">{program.name} is connected</h2>
-            <p id="connection-description">Your rewards balance is ready to use in this search.</p>
-            <div className="connection-balance">
+          <div className={`connection-success ${connectedAccount?.method === 'manual' ? 'connection-success--provided' : ''}`} aria-live="polite">
+            <span className={`connection-success-mark ${connectedAccount?.method === 'manual' ? 'connection-success-mark--provided' : ''}`}>
+              {connectedAccount?.method === 'manual' ? <Minus size={33} /> : <CheckCircle2 size={33} />}
+            </span>
+            <span className="connection-eyebrow">{connectedAccount?.method === 'manual' ? 'Balance added' : 'Connection complete'}</span>
+            <h2 id="connection-title">{connectedAccount?.method === 'manual' ? `${program.name} balance added` : `${program.name} is connected`}</h2>
+            <p id="connection-description">{connectedAccount?.method === 'manual'
+              ? 'We’ll use the balance you provided for this search.'
+              : program.isAggregator
+                ? `${AWARDWALLET_PROGRAM_IDS.length} rewards programs are now connected and ready to use.`
+                : 'Your rewards balance and account status are ready to use in this search.'}</p>
+            <div className={`connection-balance ${connectedAccount?.method === 'manual' ? 'connection-balance--provided' : ''}`}>
               <span className="connection-program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
-              <div><small>{program.program}</small><strong>{formatNumber(program.balance)} points</strong></div>
-              <Check size={15} />
+              <div>
+                <small>{connectedAccount?.method === 'manual'
+                  ? 'User-provided balance'
+                  : program.isAggregator
+                    ? program.program
+                    : connectedAccount?.status || program.program}</small>
+                <strong>{program.isAggregator
+                  ? `${connectedAccount?.programCount || AWARDWALLET_PROGRAM_IDS.length} programs connected`
+                  : `${formatNumber(connectedAccount?.balance ?? program.balance)} points`}</strong>
+              </div>
+              {connectedAccount?.method === 'manual' ? <Minus size={15} /> : <Check size={15} />}
             </div>
           </div>
         )}
@@ -1400,12 +1726,16 @@ function ProgramConnectionModal({ program, onConnectionStart, onConnected, onFin
   )
 }
 
-function ProgramSearchModal({ linked, onProgramAction, onClose }) {
+function ProgramSearchModal({ linked, linkedAccountDetails, displayedProgramIds, onProgramAction, onClose }) {
   const [query, setQuery] = useState('')
   const [visibleCount, setVisibleCount] = useState(PROGRAM_SEARCH_PAGE_SIZE)
+  const [loadingMore, setLoadingMore] = useState(false)
   const inputRef = useRef(null)
   const listRef = useRef(null)
-  const searchablePrograms = useMemo(() => programs.filter((program) => !program.featured), [])
+  const loadMoreTimer = useRef(null)
+  const searchablePrograms = useMemo(() => (
+    programs.filter((program) => !displayedProgramIds.includes(program.id))
+  ), [displayedProgramIds])
   const filteredPrograms = searchablePrograms.filter((program) => {
     const haystack = `${program.name} ${program.program}`.toLowerCase()
     return haystack.includes(query.trim().toLowerCase())
@@ -1413,17 +1743,26 @@ function ProgramSearchModal({ linked, onProgramAction, onClose }) {
   const visiblePrograms = filteredPrograms.slice(0, visibleCount)
 
   useEffect(() => {
+    if (loadMoreTimer.current) window.clearTimeout(loadMoreTimer.current)
+    loadMoreTimer.current = null
+    setLoadingMore(false)
     setVisibleCount(PROGRAM_SEARCH_PAGE_SIZE)
     if (listRef.current) listRef.current.scrollTop = 0
   }, [query])
 
   const loadMorePrograms = () => {
-    setVisibleCount((current) => Math.min(current + PROGRAM_SEARCH_PAGE_SIZE, filteredPrograms.length))
+    if (loadingMore || visibleCount >= filteredPrograms.length) return
+    setLoadingMore(true)
+    loadMoreTimer.current = window.setTimeout(() => {
+      setVisibleCount((current) => Math.min(current + PROGRAM_SEARCH_PAGE_SIZE, filteredPrograms.length))
+      setLoadingMore(false)
+      loadMoreTimer.current = null
+    }, 1000)
   }
 
   const handleProgramScroll = (event) => {
     const list = event.currentTarget
-    if (list.scrollHeight - list.scrollTop - list.clientHeight <= 32 && visibleCount < filteredPrograms.length) {
+    if (!loadingMore && list.scrollHeight - list.scrollTop - list.clientHeight <= 32 && visibleCount < filteredPrograms.length) {
       loadMorePrograms()
     }
   }
@@ -1436,6 +1775,7 @@ function ProgramSearchModal({ linked, onProgramAction, onClose }) {
     window.addEventListener('keydown', closeOnEscape)
     return () => {
       window.clearTimeout(focusTimer)
+      if (loadMoreTimer.current) window.clearTimeout(loadMoreTimer.current)
       window.removeEventListener('keydown', closeOnEscape)
     }
   }, [onClose])
@@ -1470,23 +1810,32 @@ function ProgramSearchModal({ linked, onProgramAction, onClose }) {
         >
           {visiblePrograms.map((program) => {
             const isLinked = linked.includes(program.id)
+            const account = linkedAccountDetails[program.id]
+            const isUserProvided = account?.method === 'manual'
+            const connectedSummary = account
+              ? isUserProvided
+                ? `${formatNumber(account.balance)} pts · User-provided`
+                : `${formatNumber(account.balance)} points${account.status ? ` · ${account.status}` : ''}`
+              : `${formatNumber(program.balance)}-point balance connected`
             return (
               <button
                 key={program.id}
-                className={`program-search-result ${isLinked ? 'linked' : ''}`}
+                className={`program-search-result ${isLinked ? 'linked' : ''} ${isUserProvided ? 'user-provided' : ''}`}
                 onClick={() => onProgramAction(program)}
                 aria-pressed={isLinked}
               >
                 <span className="program-logo" style={{ color: program.color, background: program.tint }}>{program.mark}</span>
-                <span className="program-copy"><strong>{program.name}</strong><small>{isLinked ? `${formatNumber(program.balance)}-point balance connected` : program.program}</small></span>
-                <span className="program-action">{isLinked ? <Check size={14} /> : '+'}</span>
+                <span className="program-copy"><strong>{program.name}</strong><small>{isLinked ? connectedSummary : program.program}</small></span>
+                <span className="program-action">{isLinked ? isUserProvided ? <Minus size={14} /> : <Check size={14} /> : '+'}</span>
               </button>
             )
           })}
           {!filteredPrograms.length && <div className="program-search-empty">No matching rewards program found.</div>}
           {visiblePrograms.length > 0 && (
             <div className="program-search-progress" role="status" aria-live="polite">
-              {visiblePrograms.length < filteredPrograms.length
+              {loadingMore
+                ? <span className="program-search-loading"><i /> Loading 20 more programs…</span>
+                : visiblePrograms.length < filteredPrograms.length
                 ? `Showing ${visiblePrograms.length} of ${filteredPrograms.length} programs · scroll for more`
                 : `All ${filteredPrograms.length} programs loaded`}
             </div>

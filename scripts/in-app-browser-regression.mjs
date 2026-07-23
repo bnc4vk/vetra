@@ -2,6 +2,7 @@ import { BROWSER_DEMO_JOURNEYS } from '../shared/browser-demo-journeys.mjs'
 import { DEMO_REWARDS_PROGRAMS } from '../src/demoRewardsPrograms.js'
 
 const PHASE_TIMEOUT = 12_000
+const AWARDWALLET_PROGRAM_IDS = ['amex', 'citi', 'alaska', 'jetblue', 'southwest']
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -180,9 +181,8 @@ async function connectProgram(tab, programName) {
   const program = DEMO_REWARDS_PROGRAMS.find((entry) => entry.name === programName)
   assert(program, `Unknown demo rewards program: ${programName}`)
 
-  let tile
-  if (program.featured) {
-    tile = tab.playwright.locator(`[data-program-id="${program.id}"]`)
+  let tile = tab.playwright.locator(`[data-program-id="${program.id}"]`)
+  if (await tile.count() === 1) {
     await click(tab, tile, `${programName} program tile`)
   } else {
     const search = tab.playwright.getByRole('button', { name: 'Search for another rewards program' })
@@ -191,7 +191,6 @@ async function connectProgram(tab, programName) {
     await typeAndPress(tab, searchInput, programName, 'ArrowDown')
     const result = tab.playwright.locator('.program-search-result').filter({ hasText: programName })
     await click(tab, result, `${programName} search result`)
-    tile = tab.playwright.locator(`[data-program-id="${program.id}"]`)
   }
 
   const username = tab.playwright.getByLabel('Username or email', { exact: true })
@@ -205,7 +204,8 @@ async function connectProgram(tab, programName) {
   await waitForLocatorState(tab, success, 'visible')
   assert(await tab.playwright.getByText('Returning to your trip…', { exact: true }).count() === 0, 'Connection success retained the removed return message.')
   await waitForLocatorState(tab, success, 'hidden')
-  if (!program.featured) {
+  tile = tab.playwright.locator(`[data-program-id="${program.id}"]`)
+  if (await tile.count() !== 1) {
     const search = tab.playwright.getByRole('button', { name: 'Search for another rewards program' })
     await click(tab, search, 'Program search tile after connection')
     const searchInput = tab.playwright.getByLabel('Search rewards programs', { exact: true })
@@ -215,11 +215,69 @@ async function connectProgram(tab, programName) {
   await one(tab, tile, `${programName} tile after connection`)
   const pressed = await tile.getAttribute('aria-pressed')
   assert(pressed === 'true', `${programName} was not marked linked after the connection flow.`)
-  if (!program.featured) {
+  const connectedDetail = tile.locator('.program-copy small')
+  await one(tab, connectedDetail, `${programName} connected balance and status`)
+  assert(
+    (await visibleText(connectedDetail)).includes(`${new Intl.NumberFormat('en-US').format(program.balance)} points ·`),
+    `${programName} did not display both its points balance and mocked account status.`,
+  )
+  if (await tab.playwright.getByRole('button', { name: 'Close program search' }).count() === 1) {
     const close = tab.playwright.getByRole('button', { name: 'Close program search' })
     await click(tab, close, 'Close program search button')
   }
+  if (await tab.playwright.locator(`[data-program-id="${program.id}"]`).count() === 1) {
+    tile = tab.playwright.locator(`[data-program-id="${program.id}"]`)
+    await tab.playwright.waitForTimeout(1400)
+    const stableState = await tile.evaluate((element) => ({
+      visible: Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects().length),
+      opacity: getComputedStyle(element).opacity,
+    }))
+    assert(stableState.visible && stableState.opacity === '1', `${programName} briefly disappeared after its confirmation animation.`)
+  }
   return { program, tile }
+}
+
+async function validateGoogleNavigationCue(tab) {
+  const tile = tab.playwright.locator('[data-program-id="bilt"]')
+  await click(tab, tile, 'Bilt program tile for Google navigation preview')
+  const google = tab.playwright.locator('.connection-login .google-signin-fallback--static')
+  await click(tab, google, 'Initial Sign in with Google button')
+  await one(tab, tab.playwright.getByText('Taking you to Bilt', { exact: true }), 'Google navigation cue')
+  await one(tab, tab.playwright.locator('.connection-navigation-cue .navigation-progress'), 'Google navigation progress cue')
+  await waitForLocatorState(tab, tab.playwright.locator('.provider-login-card'), 'visible')
+  await one(tab, tab.playwright.locator('.provider-login-card').getByText('Sign in with Google', { exact: true }), 'Provider Google sign-in action')
+  await click(tab, tab.playwright.getByRole('button', { name: 'Close Bilt sign-in' }), 'Close Bilt Google flow')
+}
+
+async function validateAwardWalletSync(tab) {
+  const awardWallet = tab.playwright.getByRole('button', { name: 'Connect AwardWallet' })
+  await click(tab, awardWallet, 'AwardWallet connector tile')
+  const username = tab.playwright.getByLabel('Username or email', { exact: true })
+  await typeAndPress(tab, username, 'browser-awardwallet@example.test', 'Tab')
+  const password = tab.playwright.getByLabel('Password', { exact: true })
+  await typeAndPress(tab, password, 'not-a-real-password', 'Tab')
+  await click(tab, tab.playwright.locator('.connection-submit'), 'AwardWallet demo sign-in')
+  const success = tab.playwright.getByText('AwardWallet is connected', { exact: true })
+  await waitForLocatorState(tab, success, 'visible')
+  await one(tab, tab.playwright.locator('.connection-success').getByText('5 programs connected', { exact: true }), 'AwardWallet synced-program count')
+  await waitForLocatorState(tab, success, 'hidden')
+
+  const syncState = await tab.playwright.evaluate((programIds) => ({
+    linkedIds: programIds.filter((programId) => document.querySelector(`[data-program-id="${programId}"]`)?.getAttribute('aria-pressed') === 'true'),
+    awardWalletText: document.querySelector('[data-program-id="awardwallet"] .program-copy small')?.textContent.trim(),
+    awardWalletAction: getComputedStyle(document.querySelector('[data-program-id="awardwallet"] .program-action')).backgroundColor,
+    standardAction: getComputedStyle(document.querySelector('[data-program-id="amex"] .program-action')).backgroundColor,
+  }), AWARDWALLET_PROGRAM_IDS)
+  assert(syncState.linkedIds.length === 5, `AwardWallet linked ${syncState.linkedIds.length} displayed programs instead of 5.`)
+  assert(syncState.awardWalletText === '5 programs connected', 'AwardWallet tile did not use the compact synced-program count.')
+  assert(syncState.awardWalletAction === syncState.standardAction, 'AwardWallet did not inherit the standard linked check styling.')
+
+  const disconnect = tab.playwright.getByRole('button', { name: 'Disconnect AwardWallet, 5 programs connected' })
+  await click(tab, disconnect, 'AwardWallet disconnect tile')
+  const remainingAwardWalletLinks = await tab.playwright.evaluate((programIds) => (
+    programIds.filter((programId) => document.querySelector(`[data-program-id="${programId}"]`)?.getAttribute('aria-pressed') === 'true')
+  ), AWARDWALLET_PROGRAM_IDS)
+  assert(remainingAwardWalletLinks.length === 0, 'AwardWallet-imported programs remained linked after disconnecting the connector.')
 }
 
 async function validateRewards(tab, journey) {
@@ -236,6 +294,15 @@ async function validateRewards(tab, journey) {
   const programGrid = tab.playwright.locator('.program-grid')
   assert(await programGrid.count() === 0, 'Rewards tiles mounted before the heading finished revealing.')
   await waitForLocatorState(tab, programGrid, 'visible')
+  const rewardTiles = programGrid.locator('.program-tile')
+  assert(await rewardTiles.count() === 14, 'Rewards grid did not retain seven balanced rows.')
+  await one(tab, tab.playwright.getByRole('button', { name: 'Connect AwardWallet' }), 'AwardWallet connector tile')
+  const finalRowLabels = await tab.playwright.evaluate(() => (
+    [...document.querySelectorAll('.program-grid .program-tile')].slice(-2).map((tile) => tile.getAttribute('aria-label'))
+  ))
+  assert(finalRowLabels.join('|') === 'Connect AwardWallet|Search for another rewards program', 'AwardWallet and program search were not in the intended penultimate/final positions.')
+  assert(await tab.playwright.locator('[data-program-id="jetblue"]').count() === 1, 'JetBlue was not present in the default program grid.')
+  assert(await tab.playwright.locator('[data-program-id="flyingblue"]').count() === 0, 'Flying Blue remained in the default grid instead of moving to search.')
   const done = tab.playwright.getByRole('button', { name: 'Done' })
   assert(await done.count() === 0, 'Done appeared before every rewards tile row finished revealing.')
   const tileDelays = await tab.playwright.evaluate(() => (
@@ -259,6 +326,10 @@ async function validateRewards(tab, journey) {
       .map((element) => element.getAttribute('data-program-id'))
   ))
   assert(featuredOrder.join('|') === 'amex|chase|capitalone|citi', 'Featured rewards order changed.')
+
+  if (journey.id === 'tokyo-seoul') await validateGoogleNavigationCue(tab)
+
+  if (journey.id === 'tokyo-seoul') await validateAwardWalletSync(tab)
 
   for (const programName of journey.linkedPrograms) {
     const connected = await connectProgram(tab, programName)
