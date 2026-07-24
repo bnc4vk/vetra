@@ -10,7 +10,6 @@ import {
   EyeOff,
   LockKeyhole,
   Minus,
-  RotateCcw,
   Search,
   Sparkles,
   X,
@@ -291,11 +290,11 @@ function getSafeAdjustmentError(error) {
   return 'I couldn’t apply that change. Try naming the flight leg and what you want to update.'
 }
 
-function Brand() {
+function Brand({ onClick }) {
   return (
-    <div className="brand" aria-label="Vetra">
+    <button className="brand" type="button" onClick={onClick} aria-label="Return to Vetra welcome">
       <img className="brand-logo" src={vetraLogo} alt="Vetra" />
-    </div>
+    </button>
   )
 }
 
@@ -317,8 +316,17 @@ function WordReveal({ children, className = '', speed = 55, instant = false, onC
     }
     return delay
   })
+  const revealDuration = (delays.at(-1) || 0) + 650
+  const mobileFlowDuration = Math.round(revealDuration * 1.3)
   return (
-    <span className={`word-reveal ${instant ? 'word-reveal--instant' : ''} ${className}`} aria-label={children}>
+    <span
+      className={`word-reveal ${instant ? 'word-reveal--instant' : ''} ${className}`}
+      aria-label={children}
+      style={{
+        '--reveal-duration': `${revealDuration}ms`,
+        '--mobile-flow-duration': `${mobileFlowDuration}ms`,
+      }}
+    >
       {words.map((word, index) => (
         <span
           aria-hidden="true"
@@ -731,7 +739,7 @@ function App() {
     setOptimizationGlobeComplete(true)
   }, [])
 
-  const reset = () => {
+  const resetJourney = (startPhase) => {
     interpretationController.current?.abort()
     adjustmentController.current?.abort()
     interpretationController.current = null
@@ -741,7 +749,7 @@ function App() {
     optimizationTimer.current = null
     if (resultTimer.current) window.clearTimeout(resultTimer.current)
     resultTimer.current = null
-    setDraft(DEV_STEP3_MODE ? DEV_STEP3_BRIEF : '')
+    setDraft(startPhase === 'welcome' ? '' : DEV_STEP3_MODE ? DEV_STEP3_BRIEF : '')
     setBrief(null)
     setFollowUp(null)
     setLinked([])
@@ -764,10 +772,14 @@ function App() {
     setHasAppliedAdjustment(false)
     setRewardsCopyComplete(false)
     setRewardsTilesComplete(false)
-    setIntroCopyComplete(true)
-    introCompleteRef.current = true
-    setPhase('intake')
+    setIntroCopyComplete(startPhase !== 'welcome')
+    setIntroExiting(false)
+    introCompleteRef.current = startPhase !== 'welcome'
+    setPhase(startPhase)
   }
+
+  const reset = () => resetJourney('intake')
+  const returnToWelcome = () => resetJourney('welcome')
 
   const isIntro = ['welcome', 'prompt', 'intake'].includes(phase)
   const workspacePhase = ['building', 'followup', 'rewards', 'adjust'].includes(phase)
@@ -803,10 +815,7 @@ function App() {
       data-recommendation-count={recommendations.length}
     >
       <header className="app-header">
-        <Brand />
-        {!isIntro && phase !== 'results' && (
-          <button className="reset-button" onClick={reset}><RotateCcw size={14} /> Start over</button>
-        )}
+        <Brand onClick={returnToWelcome} />
       </header>
 
       {isIntro && (
@@ -1904,14 +1913,26 @@ function ResultsView({ linkedPrograms, totalBalance, brief, recommendations, exp
             key={result.title}
             style={{ '--result-color': result.color, '--tile-delay': `${index * 90}ms` }}
           >
-            <button className="result-summary" data-testid={`result-summary-${index + 1}`} onClick={() => onExpand(expanded === index ? -1 : index)} aria-expanded={expanded === index}>
-              <span className="result-rank">0{index + 1}</span>
+            <div
+              className="result-summary"
+              data-testid={`result-summary-${index + 1}`}
+              onClick={() => onExpand(expanded === index ? -1 : index)}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget || !['Enter', ' '].includes(event.key)) return
+                event.preventDefault()
+                onExpand(expanded === index ? -1 : index)
+              }}
+              aria-expanded={expanded === index}
+              role="button"
+              tabIndex="0"
+            >
+              <span className="result-rank">{index + 1}</span>
               <span className="result-title"><small>{result.label}</small><strong>{result.title}</strong></span>
               <span className="result-metric"><small>Trip total</small><strong>{result.points}</strong><em>{result.fees}</em></span>
-              <span className="result-metric"><small>Point value</small><strong>{result.value}</strong></span>
-              <span className="result-score"><strong>{result.score}</strong><small>Vetra score</small></span>
+              <ResultPointValue value={result.value} index={index} />
+              <span className="result-score"><small>Vetra score</small><strong>{result.score}</strong></span>
               <span className="result-chevron">⌄</span>
-            </button>
+            </div>
             <div className="result-detail-shell" aria-hidden={expanded !== index}>
               <div className="result-detail-clip" inert={expanded !== index}>
                 <div className="result-detail">
@@ -1944,6 +1965,46 @@ function ResultsView({ linkedPrograms, totalBalance, brief, recommendations, exp
       </section>
       <button className="new-trip-button" onClick={onReset}>Plan another trip <ArrowRight size={15} /></button>
     </main>
+  )
+}
+
+function ResultPointValue({ value, index }) {
+  const [open, setOpen] = useState(false)
+  const tooltipId = `result-point-value-tooltip-${index + 1}`
+  return (
+    <span className={`result-metric result-point-value ${open ? 'is-open' : ''}`}>
+      <small>
+        Point value
+        <button
+          type="button"
+          className="result-point-value-help"
+          data-testid={`result-point-value-help-${index + 1}`}
+          aria-label="Explain point value calculation"
+          aria-expanded={open}
+          aria-describedby={open ? tooltipId : undefined}
+          onClick={(event) => {
+            event.stopPropagation()
+            setOpen((current) => !current)
+          }}
+          onBlur={() => setOpen(false)}
+          onKeyDown={(event) => {
+            event.stopPropagation()
+            if (event.key === 'Escape') setOpen(false)
+          }}
+        >
+          ⓘ
+        </button>
+      </small>
+      <strong>{value}</strong>
+      <span
+        className="result-point-value-tooltip"
+        id={tooltipId}
+        role="tooltip"
+        aria-hidden={!open}
+      >
+        Net cents per point equals the cash fare minus fees, divided by points.
+      </span>
+    </span>
   )
 }
 

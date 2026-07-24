@@ -120,7 +120,36 @@ async function validateIntro(tab) {
 async function submitTripAndResolveFollowUps(tab, journey) {
   const tripInput = tab.playwright.getByLabel('Trip details', { exact: true })
   await typeAndPress(tab, tripInput, journey.brief)
+  const captureMotion = await tab.playwright.evaluate(() => {
+    const app = document.querySelector('[data-testid="vetra-app"]')
+    const transform = getComputedStyle(document.querySelector('.intro-content')).transform
+    const values = transform === 'none'
+      ? []
+      : transform.slice(transform.indexOf('(') + 1, -1).split(',').map(Number)
+    return {
+      active: app?.classList.contains('app--transition-capture'),
+      translateX: transform.startsWith('matrix3d') ? values[12] : values[4] || 0,
+    }
+  })
+  assert(captureMotion.active, 'Trip submission did not enter the capture transition.')
+  assert(Math.abs(captureMotion.translateX) <= 1, `Capture transition dragged horizontally by ${captureMotion.translateX}px.`)
   await waitForPhase(tab, 'building')
+  const initialMobileFlow = await tab.playwright.evaluate(() => {
+    if (!window.matchMedia('(max-width: 767px)').matches) return null
+    const conversation = document.querySelector('.journey-conversation')?.getBoundingClientRect()
+    const itinerary = document.querySelector('.journey-summary')?.getBoundingClientRect()
+    return { conversationBottom: conversation?.bottom || 0, itineraryTop: itinerary?.top || 0 }
+  })
+  if (initialMobileFlow) {
+    await tab.playwright.waitForTimeout(240)
+    const laterMobileFlow = await tab.playwright.evaluate(() => {
+      const conversation = document.querySelector('.journey-conversation')?.getBoundingClientRect()
+      const itinerary = document.querySelector('.journey-summary')?.getBoundingClientRect()
+      return { conversationBottom: conversation?.bottom || 0, itineraryTop: itinerary?.top || 0 }
+    })
+    assert(laterMobileFlow.itineraryTop > initialMobileFlow.itineraryTop + 8, 'Mobile itinerary did not glide down as the building cue revealed.')
+    assert(Math.abs((laterMobileFlow.itineraryTop - laterMobileFlow.conversationBottom) - 26) <= 2, 'Mobile itinerary left reserved space below the revealing building cue.')
+  }
   await assertStep3TopAlignment(tab, 'building')
   const heightMotion = await tab.playwright.evaluate(() => ({
     mobile: window.matchMedia('(max-width: 767px)').matches,
@@ -134,6 +163,7 @@ async function submitTripAndResolveFollowUps(tab, journey) {
   }
   const buildingHeading = tab.playwright.getByText('I’m building a preliminary itinerary.', { exact: true })
   await one(tab, buildingHeading, 'Building phase heading')
+  assert(await tab.playwright.getByText('Start over', { exact: true }).count() === 0, 'Start over remained visible after intake.')
   await one(tab, tab.playwright.getByText('Building', { exact: true }), 'Building status tile')
   assert(await tab.playwright.getByText('Building your trip', { exact: true }).count() === 0, 'Removed building label was still visible.')
   assert(await tab.playwright.getByText('Mapping your route into complete flight legs', { exact: true }).count() === 0, 'Removed route-mapping support copy was still visible.')
@@ -306,6 +336,25 @@ async function validateRewards(tab, journey) {
   const programGrid = tab.playwright.locator('.program-grid')
   assert(await programGrid.count() === 0, 'Rewards tiles mounted before the heading finished revealing.')
   await waitForLocatorState(tab, programGrid, 'visible')
+  const initialRewardsFlow = await tab.playwright.evaluate(() => {
+    if (!window.matchMedia('(max-width: 767px)').matches) return null
+    const stage = document.querySelector('.left-program-stage')?.getBoundingClientRect()
+    const conversation = document.querySelector('.journey-conversation')?.getBoundingClientRect()
+    const itinerary = document.querySelector('.journey-summary')?.getBoundingClientRect()
+    return { stageHeight: stage?.height || 0, conversationBottom: conversation?.bottom || 0, itineraryTop: itinerary?.top || 0 }
+  })
+  if (initialRewardsFlow) {
+    await tab.playwright.waitForTimeout(360)
+    const laterRewardsFlow = await tab.playwright.evaluate(() => {
+      const stage = document.querySelector('.left-program-stage')?.getBoundingClientRect()
+      const conversation = document.querySelector('.journey-conversation')?.getBoundingClientRect()
+      const itinerary = document.querySelector('.journey-summary')?.getBoundingClientRect()
+      return { stageHeight: stage?.height || 0, conversationBottom: conversation?.bottom || 0, itineraryTop: itinerary?.top || 0 }
+    })
+    assert(laterRewardsFlow.stageHeight > initialRewardsFlow.stageHeight + 20, 'Mobile rewards rows did not progressively open their layout space.')
+    assert(laterRewardsFlow.itineraryTop > initialRewardsFlow.itineraryTop + 20, 'Mobile itinerary did not glide down with the rewards rows.')
+    assert(Math.abs((laterRewardsFlow.itineraryTop - laterRewardsFlow.conversationBottom) - 26) <= 2, 'Mobile rewards reveal left empty reserved space above the itinerary.')
+  }
   const rewardTiles = programGrid.locator('.program-tile')
   assert(await rewardTiles.count() === 14, 'Rewards grid did not retain seven balanced rows.')
   await one(tab, tab.playwright.getByRole('button', { name: 'Connect AwardWallet' }), 'AwardWallet connector tile')
@@ -396,6 +445,72 @@ async function validateOptimizationAndResults(tab, journey) {
     ? `${new Intl.NumberFormat('en-US').format(linkedTotal)} points across connected rewards programs were considered.`
     : 'No rewards programs were connected, so cash fares are shown.'
   await one(tab, tab.playwright.getByText(fundingCopy, { exact: true }), 'Results rewards summary')
+  const summaryFormatting = await tab.playwright.evaluate(() => ({
+    ranks: [...document.querySelectorAll('.result-rank')].map((element) => {
+      const cell = element.getBoundingClientRect()
+      const card = element.closest('.result-card').getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      const text = range.getBoundingClientRect()
+      return {
+        value: element.textContent.trim(),
+        centerOffset: (text.left + text.width / 2) - ((card.left + 1 + cell.right) / 2),
+      }
+    }),
+    scores: [...document.querySelectorAll('.result-score')].map((element) => ({
+      firstTag: element.firstElementChild?.tagName,
+      firstText: element.firstElementChild?.textContent.trim(),
+      left: element.getBoundingClientRect().left,
+      center: (() => {
+        const rect = element.getBoundingClientRect()
+        return rect.top + rect.height / 2
+      })(),
+      labelRight: element.querySelector('small')?.getBoundingClientRect().right || 0,
+      dataRight: element.querySelector('strong')?.getBoundingClientRect().right || 0,
+      textAlign: getComputedStyle(element).textAlign,
+    })),
+    titles: [...document.querySelectorAll('.result-title')].map((element) => ({
+      left: element.getBoundingClientRect().left,
+      center: (() => {
+        const rect = element.getBoundingClientRect()
+        return rect.top + rect.height / 2
+      })(),
+    })),
+    totals: [...document.querySelectorAll('.result-summary > .result-metric:nth-child(3)')].map((element) => element.getBoundingClientRect().left),
+    values: [...document.querySelectorAll('.result-point-value')].map((element) => ({
+      left: element.getBoundingClientRect().left,
+      labelRight: element.querySelector('small')?.getBoundingClientRect().right || 0,
+      dataRight: element.querySelector('strong')?.getBoundingClientRect().right || 0,
+      textAlign: getComputedStyle(element).textAlign,
+    })),
+    chevronLefts: [...document.querySelectorAll('.result-chevron')].map((element) => element.getBoundingClientRect().left),
+    mobile: window.matchMedia('(max-width: 767px)').matches,
+  }))
+  const rankValues = summaryFormatting.ranks.map((rank) => rank.value)
+  assert(rankValues.join('|') === '1|2|3', `Candidate ranks used ${rankValues.join('|')} instead of 1|2|3.`)
+  assert(summaryFormatting.ranks.every((rank) => Math.abs(rank.centerOffset) <= 1), 'Candidate ranks were not centered in their cells.')
+  assert(summaryFormatting.scores.every((score) => score.firstTag === 'SMALL' && score.firstText === 'Vetra score'), 'Vetra score labels were not positioned before their circles.')
+  if (summaryFormatting.mobile) {
+    assert(summaryFormatting.scores.every((score, index) => Math.abs(score.center - summaryFormatting.titles[index].center) <= 1), 'Mobile Vetra score and candidate classification components were not vertically centered.')
+    assert(summaryFormatting.titles.every((title, index) => Math.abs(title.left - summaryFormatting.totals[index]) <= 1), 'Mobile classification and Trip total did not share the left content column.')
+    assert(summaryFormatting.scores.every((score, index) => Math.abs(score.left - summaryFormatting.values[index].left) <= 1), 'Mobile Vetra score and Point value did not share the right content column.')
+    assert(summaryFormatting.scores.every((score) => score.textAlign === 'right' && Math.abs(score.labelRight - score.dataRight) <= 1), 'Mobile Vetra score content was not right-aligned.')
+    assert(summaryFormatting.values.every((value) => value.textAlign === 'right' && Math.abs(value.labelRight - value.dataRight) <= 1), 'Mobile Point value content was not right-aligned.')
+    assert(summaryFormatting.scores.every((score, index) => {
+      const gap = summaryFormatting.chevronLefts[index] - score.dataRight
+      return gap >= 10 && gap <= 16
+    }), 'Mobile right content column did not preserve the intended spacing before the chevron.')
+  }
+  const collapsedSummary = tab.playwright.getByTestId('result-summary-2')
+  await one(tab, collapsedSummary, 'Collapsed result summary for tooltip isolation')
+  assert(await collapsedSummary.getAttribute('aria-expanded') === 'false', 'Tooltip isolation result was not initially collapsed.')
+  const pointValueHelp = tab.playwright.getByTestId('result-point-value-help-2')
+  await click(tab, pointValueHelp, 'Collapsed result point-value help')
+  assert(await collapsedSummary.getAttribute('aria-expanded') === 'false', 'Point-value help click expanded its candidate row.')
+  assert(await pointValueHelp.getAttribute('aria-expanded') === 'true', 'Point-value explanation did not open after clicking its help icon.')
+  const pointValueTooltipOpacity = await tab.playwright.locator('#result-point-value-tooltip-2').evaluate((element) => getComputedStyle(element).opacity)
+  assert(pointValueTooltipOpacity === '1', 'Point-value explanation was not visibly presented.')
+  await click(tab, pointValueHelp, 'Close collapsed result point-value help')
   const resultFunding = await tab.playwright.evaluate(() => (
     [...document.querySelectorAll('.result-card')].map((card) => ({
       mode: card.getAttribute('data-funding-mode'),
@@ -456,6 +571,9 @@ async function validateOptimizationAndResults(tab, journey) {
   const restart = tab.playwright.getByRole('button', { name: 'Plan another trip' })
   await click(tab, restart, 'Plan another trip button')
   await waitForPhase(tab, 'intake')
+  const brand = tab.playwright.getByRole('button', { name: 'Return to Vetra welcome' })
+  await click(tab, brand, 'Vetra logo')
+  await waitForPhase(tab, 'welcome')
 }
 
 async function runJourney(tab, journey, baseUrl, firstRun) {
